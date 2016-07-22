@@ -1,0 +1,19 @@
+#! /usr/bin/env sh
+# Copyright (C) 2015 Steven Stewart-Gallus
+#
+# Copying and distribution of this file, with or without modification,
+# are permitted in any medium without royalty provided the copyright
+# notice and this notice are preserved.
+
+set -e
+set -C
+set -u
+
+# Just set the build system to be native by default
+
+SRCDIR="$(cd "$(dirname "$0")" && pwd)"
+
+exec "${SRCDIR}/configure"\
+  --host="$("${SRCDIR}/build-aux/config.guess")"\
+  --build="$("${SRCDIR}/build-aux/config.guess")"\
+  "$@"

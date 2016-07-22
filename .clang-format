@@ -1,0 +1,11 @@
+# -*- mode: yaml -*-
+BasedOnStyle: LLVM
+UseTab: ForIndentation
+IndentWidth: 8
+ColumnLimit: 72
+
+AllowShortFunctionsOnASingleLine: false
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+
+BreakBeforeBraces: Linux

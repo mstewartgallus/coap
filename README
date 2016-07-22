@@ -1,0 +1,34 @@
+This is the README file for my little Coap project.
+
+Coap is going to be an IPC library.
+
+  Copyright (C) 2016 Steven Stewart-Gallus
+
+  Copying and distribution of this file, with or without modification,
+  are permitted in any medium without royalty provided the copyright
+  notice and this notice are preserved.
+
+See the file INSTALL for building and installation instruction.
+
+For the most part IPC is kind of crappy.  I plan to use the COAP
+protocol to implement the backbone of an IPC library for my Linted
+project.  Goals are to use DHCP and DNS to dynamically register
+localhost IP addresses such as 127.1.12.42 under DNS names such as
+myservice.localhost and then communicate between these services.
+
+A few explicitly labeled files (such as this README) are distributed
+under much more simple and less restrictive licences than the Apache
+License. But for most files and unless otherwise stated:
+
+Coap is licensed under the Apache License, Version 2.0 (the
+"License"); you may not use Linted except in compliance with
+the License. You may obtain a copy of the License at
+
+     http://www.apache.org/licenses/LICENSE-2.0
+
+You should have received a copy of the Licence under the file COPYING
+distributed with this program.
+
+Home page: https://gitlab.com/linted/coap
+
+Coap is free software.  See the file COPYING for copying conditions.

@@ -39,6 +39,17 @@
 
 /* https://tools.ietf.org/html/rfc7252 */
 
+struct request {
+	char buf[1024U];
+	uint_fast16_t message_id;
+	uint_fast64_t token;
+	size_t size;
+	unsigned long transmission_counter;
+	int timeout;
+	bool acked;
+};
+
+
 #define ARRAY_SIZE(...) (sizeof __VA_ARGS__ / sizeof(__VA_ARGS__)[0U])
 
 static struct coap_logger my_logger;
@@ -334,31 +345,99 @@ got_socket:
 		        real_host);
 	}
 
-	static char recv_buf[1024U] = {0};
-	static char send_buf[1024U] = {0};
-
-	size_t encoded_size = 0U;
-
-	struct message {
-		uint_fast16_t message_id;
-		uint_fast64_t token;
-		char *buf;
-		size_t size;
-		unsigned long transmission_counter;
-		int timeout;
-		bool acked;
-	};
-	struct message message = {0};
-
 	/* Here we have now found the server we are connecting to. */
-	goto send_message;
+
+	static char recv_buf[1024U] = {0};
+
+	struct request request = {0};
+
+	{
+		uint_fast16_t message_id = (uint_least16_t)random();
+		uint_fast64_t token = (uint_fast64_t)random();
+
+		coap_type message_type = COAP_TYPE_CONFIRMABLE;
+
+		struct coap_option options[5U] = {0};
+
+		size_t ii = 0U;
+		options[ii].type = COAP_OPTION_TYPE_URI_HOST;
+		options[ii].value.string.buf = host;
+		options[ii].value.string.size = strlen(host);
+		++ii;
+
+		options[ii].type = COAP_OPTION_TYPE_URI_PORT;
+		options[ii].value.uint = port;
+		++ii;
+
+		if (path != 0) {
+			options[ii].type = COAP_OPTION_TYPE_URI_PATH;
+			options[ii].value.string.buf = path;
+			options[ii].value.string.size = strlen(path);
+			++ii;
+		}
+
+		if (query != 0) {
+			options[ii].type = COAP_OPTION_TYPE_URI_QUERY;
+			options[ii].value.string.buf = query;
+			options[ii].value.string.size = strlen(query);
+			++ii;
+		}
+
+		options[ii].type = COAP_OPTION_TYPE_ACCEPT;
+		options[ii].value.uint = COAP_CONTENT_FORMAT_APPLICATION_JSON;
+		++ii;
+
+		fprintf(stderr, "sending message id 0x%" PRIx16 " token 0x%" PRIx64 "\n",
+			(uint_least16_t)message_id,
+			(uint_least64_t)token);
+
+		size_t encoded_size = 0U;
+
+		coap_error err;
+		{
+			size_t xx = 0U;
+			err = coap_header_encode(
+				(struct coap_logger *)&my_logger, &xx, 1U,
+				message_type, COAP_CODE_REQUEST_GET,
+				message_id, token, options, ii, false, request.buf,
+				sizeof request.buf);
+			encoded_size = xx;
+		}
+		switch (err) {
+		case 0:
+			break;
+
+		case COAP_ERROR_UNSUPPORTED_VERSION:
+			fprintf(stderr, "unsupported version\n");
+			return EXIT_FAILURE;
+
+		case COAP_ERROR_BAD_PACKET:
+			fprintf(stderr, "bad packet\n");
+			return EXIT_FAILURE;
+
+		case COAP_ERROR_BAD_OPTION:
+			fprintf(stderr, "bad option\n");
+			return EXIT_FAILURE;
+		}
+
+		if (-1 == send(sockfd, request.buf, request.size, 0)) {
+			perror("send");
+			return EXIT_FAILURE;
+		}
+
+		request.message_id = message_id;
+		request.token = token;
+		request.timeout = random_timeout_ms(mycfg);
+		request.transmission_counter = 0;
+		request.size = encoded_size;
+	}
 
 	for (;;) {
 		{
 			struct pollfd pollfds[] = {
 				{.fd = sockfd, .events = POLLIN}};
 			int nfds =
-				poll(pollfds, ARRAY_SIZE(pollfds), message.acked ? -1 : message.timeout);
+				poll(pollfds, ARRAY_SIZE(pollfds), request.acked ? -1 : request.timeout);
 			if (nfds < 0) {
 				perror("poll");
 				return EXIT_FAILURE;
@@ -381,97 +460,16 @@ got_socket:
 				goto recved_message;
 		}
 
-	send_message:
-		if (0 == message.buf) {
-			uint_fast16_t message_id = (uint_least16_t)random();
-			uint_fast64_t token = (uint_fast64_t)random();
+		if (-1 == send(sockfd, request.buf, request.size, 0)) {
+			perror("send");
+			return EXIT_FAILURE;
+		}
 
-			coap_type message_type = COAP_TYPE_CONFIRMABLE;
-
-			struct coap_option options[5U] = {0};
-
-			size_t ii = 0U;
-			options[ii].type = COAP_OPTION_TYPE_URI_HOST;
-			options[ii].value.string.buf = host;
-			options[ii].value.string.size = strlen(host);
-			++ii;
-
-			options[ii].type = COAP_OPTION_TYPE_URI_PORT;
-			options[ii].value.uint = port;
-			++ii;
-
-			if (path != 0) {
-				options[ii].type = COAP_OPTION_TYPE_URI_PATH;
-				options[ii].value.string.buf = path;
-				options[ii].value.string.size = strlen(path);
-				++ii;
-			}
-
-			if (query != 0) {
-				options[ii].type = COAP_OPTION_TYPE_URI_QUERY;
-				options[ii].value.string.buf = query;
-				options[ii].value.string.size = strlen(query);
-				++ii;
-			}
-
-			options[ii].type = COAP_OPTION_TYPE_ACCEPT;
-			options[ii].value.uint = COAP_CONTENT_FORMAT_APPLICATION_JSON;
-			++ii;
-
-			fprintf(stderr, "sending message id 0x%" PRIx16 " token 0x%" PRIx64 "\n",
-				(uint_least16_t)message_id,
-				(uint_least64_t)token);
-
-			coap_error err;
-			{
-				size_t xx = 0U;
-				err = coap_header_encode(
-					(struct coap_logger *)&my_logger, &xx, 1U,
-					message_type, COAP_CODE_REQUEST_GET,
-					message_id, token, options, ii, false, send_buf,
-					sizeof send_buf);
-				encoded_size = xx;
-			}
-			switch (err) {
-			case 0:
-				break;
-
-			case COAP_ERROR_UNSUPPORTED_VERSION:
-				fprintf(stderr, "unsupported version\n");
-				return EXIT_FAILURE;
-
-			case COAP_ERROR_BAD_PACKET:
-				fprintf(stderr, "bad packet\n");
-				return EXIT_FAILURE;
-
-			case COAP_ERROR_BAD_OPTION:
-				fprintf(stderr, "bad option\n");
-				return EXIT_FAILURE;
-			}
-
-			if (-1 == send(sockfd, send_buf, encoded_size, 0)) {
-				perror("send");
-				return EXIT_FAILURE;
-			}
-
-			message.message_id = message_id;
-			message.token = token;
-			message.timeout = random_timeout_ms(mycfg);
-			message.transmission_counter = 0;
-			message.buf = send_buf;
-			message.size = encoded_size;
-		} else {
-			if (-1 == send(sockfd, message.buf, message.size, 0)) {
-				perror("send");
-				return EXIT_FAILURE;
-			}
-
-			message.timeout *= 2;
-			++message.transmission_counter;
-			if (message.transmission_counter > coap_cfg_max_retransmit(mycfg)) {
-				fprintf(stderr, "message timeout\n");
-				return EXIT_FAILURE;
-			}
+		request.timeout *= 2;
+		++request.transmission_counter;
+		if (request.transmission_counter > coap_cfg_max_retransmit(mycfg)) {
+			fprintf(stderr, "message timeout\n");
+			return EXIT_FAILURE;
 		}
 		continue;
 
@@ -513,9 +511,9 @@ got_socket:
 
 		char const *details = coap_code_string(decoder.code);
 		if (0 == details)
-			details = "unknown response code detail";
+			details = "unknown request code detail";
 
-		fprintf(stderr, "Received COAP response:\n");
+		fprintf(stderr, "Received COAP request:\n");
 		fprintf(stderr, "\t%s\n", type_str);
 		fprintf(stderr, "\t%s\n", details);
 		fprintf(stderr, "\tMessage Id: 0x%" PRIx16 "\n",
@@ -523,22 +521,22 @@ got_socket:
 		fprintf(stderr, "\tToken: 0x%" PRIx64 "\n",
 			(uint_least64_t)decoder.token);
 
-		if (message.message_id != decoder.message_id) {
+		if (request.message_id != decoder.message_id) {
 			fprintf(stderr, "Bad message id ignoring!\n");
 			continue;
 		}
 
-		if (message.token != decoder.token) {
+		if (request.token != decoder.token) {
 			fprintf(stderr, "Bad token ignoring!\n");
 			continue;
 		}
 
-		if (!message.acked && decoder.type != COAP_TYPE_ACKNOWLEDGEMENT) {
+		if (!request.acked && decoder.type != COAP_TYPE_ACKNOWLEDGEMENT) {
 			fprintf(stderr, "Not an ack!\n");
 			continue;
 		}
 
-		if (message.acked && decoder.type == COAP_TYPE_ACKNOWLEDGEMENT) {
+		if (request.acked && decoder.type == COAP_TYPE_ACKNOWLEDGEMENT) {
 			fprintf(stderr, "Is an ack!\n");
 			continue;
 		}
@@ -573,7 +571,7 @@ got_socket:
 		}
 		fprintf(stderr, "\n");
 
-		message.acked = true;
+		request.acked = true;
 		if (!decoder.has_payload)
 			continue;
 

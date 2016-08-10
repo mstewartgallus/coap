@@ -300,54 +300,64 @@ int main(int argc, char **argv)
 
 		coap_type message_type = COAP_TYPE_CONFIRMABLE;
 
-		struct coap_option options[5U] = {0};
-
-		size_t ii = 0U;
-		options[ii].type = COAP_OPTION_TYPE_URI_HOST;
-		options[ii].value.string.buf = host;
-		options[ii].value.string.size = strlen(host);
-		++ii;
-
-		options[ii].type = COAP_OPTION_TYPE_URI_PORT;
-		options[ii].value.uint = port;
-		++ii;
-
-		if (path != 0) {
-			options[ii].type = COAP_OPTION_TYPE_URI_PATH;
-			options[ii].value.string.buf = path;
-			options[ii].value.string.size = strlen(path);
-			++ii;
-		}
-
-		if (query != 0) {
-			options[ii].type = COAP_OPTION_TYPE_URI_QUERY;
-			options[ii].value.string.buf = query;
-			options[ii].value.string.size = strlen(query);
-			++ii;
-		}
-
-		options[ii].type = COAP_OPTION_TYPE_ACCEPT;
-		options[ii].value.uint =
-		    COAP_CONTENT_FORMAT_APPLICATION_JSON;
-		++ii;
-
 		fprintf(stderr, "sending message id 0x%" PRIx16
 		                " token 0x%" PRIx64 "\n",
 		        (uint_least16_t)message_id,
 		        (uint_least64_t)token);
 
-		size_t encoded_size = 0U;
+		struct coap_encoder encoder = {0};
 
 		coap_error err;
-		{
-			size_t xx = 0U;
-			err = coap_header_encode(
-			    (struct coap_logger *)&my_logger, &xx, 1U,
-			    message_type, COAP_CODE_REQUEST_GET,
-			    message_id, token, options, ii, read_stdin,
-			    request.buf, sizeof request.buf);
-			encoded_size = xx;
+		err = coap_encode_start(
+		    &encoder, (struct coap_logger *)&my_logger, 1U,
+		    message_type, COAP_CODE_REQUEST_GET, message_id,
+		    token, request.buf, sizeof request.buf);
+		if (err != 0)
+			goto coap_error;
+
+		if (host != 0) {
+			err = coap_encode_option_string(
+			    &encoder, COAP_OPTION_TYPE_URI_HOST, host,
+			    strlen(host));
+			if (err != 0)
+				goto coap_error;
 		}
+
+		err = coap_encode_option_uint(
+		    &encoder, COAP_OPTION_TYPE_URI_PORT, port);
+		if (err != 0)
+			goto coap_error;
+
+		if (path != 0) {
+			err = coap_encode_option_string(
+			    &encoder, COAP_OPTION_TYPE_URI_PATH, path,
+			    strlen(path));
+			if (err != 0)
+				goto coap_error;
+		}
+
+		if (query != 0) {
+			err = coap_encode_option_string(
+			    &encoder, COAP_OPTION_TYPE_URI_QUERY, query,
+			    strlen(query));
+			if (err != 0)
+				goto coap_error;
+		}
+
+		err = coap_encode_option_uint(
+		    &encoder, COAP_OPTION_TYPE_ACCEPT,
+		    COAP_CONTENT_FORMAT_APPLICATION_JSON);
+		if (err != 0)
+			goto coap_error;
+
+		if (read_stdin) {
+			err = coap_encode_payload(&encoder, stdin_buf,
+			                          stdin_size);
+			if (err != 0)
+				goto coap_error;
+		}
+
+	coap_error:
 		switch (err) {
 		case 0:
 			break;
@@ -365,20 +375,11 @@ int main(int argc, char **argv)
 			return EXIT_FAILURE;
 		}
 
-		if (encoded_size + stdin_size > sizeof request.buf) {
-			fprintf(stderr, "too large\n");
-			return EXIT_FAILURE;
-		}
-
-		memcpy(request.buf + encoded_size, stdin_buf,
-		       stdin_size);
-		encoded_size += stdin_size;
-
 		request.message_id = message_id;
 		request.token = token;
 		request.timeout = random_timeout_ms(mycfg);
 		request.transmission_counter = 0;
-		request.size = encoded_size;
+		request.size = encoder.buffer_index;
 
 		if (-1 == send(sockfd, request.buf, request.size, 0)) {
 			perror("send");

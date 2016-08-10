@@ -143,6 +143,14 @@ struct coap_decoder {
 	};
 };
 
+struct coap_encoder {
+	struct coap_logger *logger;
+	char *buffer;
+	size_t buffer_size;
+	size_t buffer_index;
+	size_t last_option_type;
+};
+
 enum { COAP_EMPTY_PACKET_SIZE = 4 };
 
 struct coap_cfg;
@@ -173,6 +181,21 @@ coap_error coap_header_decode_start(struct coap_decoder *decoder,
                                     char const *message,
                                     size_t message_size);
 coap_error coap_header_decode_option(struct coap_decoder *decoder);
+
+coap_error coap_encode_start(struct coap_encoder *encoder,
+                             struct coap_logger *logger,
+                             unsigned char version, coap_type type,
+                             coap_code code, uint_fast16_t message_id,
+                             uint_fast64_t token, char *buffer,
+                             size_t buffer_size);
+coap_error coap_encode_option_string(struct coap_encoder *encoder,
+                                     coap_option_type option_type,
+                                     char const *str, size_t str_size);
+coap_error coap_encode_option_uint(struct coap_encoder *encoder,
+                                   coap_option_type option_type,
+                                   uint64_t uint);
+coap_error coap_encode_payload(struct coap_encoder *encoder,
+                               char *payload, size_t payload_size);
 
 char const *coap_type_string(coap_type type);
 char const *coap_code_string(coap_code code);

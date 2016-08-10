@@ -713,17 +713,8 @@ static void process_sockfd(struct listener *listener)
 		coap_type type;
 		switch (response_code) {
 		case COAP_CODE_RESPONSE_CLIENT_ERROR_BAD_REQUEST:
-			type = COAP_TYPE_RESET;
-			break;
-
 		case COAP_CODE_RESPONSE_CLIENT_ERROR_BAD_OPTION:
-			type = COAP_TYPE_RESET;
-			break;
-
 		case COAP_CODE_RESPONSE_CLIENT_ERROR_METHOD_NOT_FOUND:
-			type = COAP_TYPE_RESET;
-			break;
-
 		case COAP_CODE_EMPTY:
 			type = COAP_TYPE_RESET;
 			break;
@@ -745,8 +736,7 @@ static void process_sockfd(struct listener *listener)
 			{
 				size_t xx = 0U;
 				err = coap_header_encode(
-				    logger, &xx, 1U,
-				    COAP_TYPE_ACKNOWLEDGEMENT,
+				    logger, &xx, 1U, type,
 				    response_code, decoder.message_id,
 				    decoder.token, options,
 				    ARRAY_SIZE(options), true,

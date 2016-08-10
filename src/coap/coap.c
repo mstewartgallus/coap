@@ -45,13 +45,13 @@ struct coap_cfg {
 struct coap_cfg const *coap_cfg_default(void)
 {
 	static struct coap_cfg const default_cfg = {
-		.ack_timeout_ns = 2U * 10000000U,
-		.ack_random_factor_numerator = 3,
-		.ack_random_factor_demoninator = 2,
-		.max_retransmit = 4U,
-		.nstart = 1U,
-		.default_leisure_ns = 5U * 10000000U,
-		.probing_rate = 1U};
+	    .ack_timeout_ns = 2U * 10000000U,
+	    .ack_random_factor_numerator = 3,
+	    .ack_random_factor_demoninator = 2,
+	    .max_retransmit = 4U,
+	    .nstart = 1U,
+	    .default_leisure_ns = 5U * 10000000U,
+	    .probing_rate = 1U};
 	return &default_cfg;
 }
 
@@ -60,12 +60,14 @@ unsigned long coap_cfg_ack_timeout_ms(struct coap_cfg const *cfg)
 	return cfg->ack_timeout_ns / 100000;
 }
 
-unsigned long coap_cfg_ack_random_factor_numerator(struct coap_cfg const *cfg)
+unsigned long
+coap_cfg_ack_random_factor_numerator(struct coap_cfg const *cfg)
 {
 	return cfg->ack_random_factor_numerator;
 }
 
-unsigned long coap_cfg_ack_random_factor_denominator(struct coap_cfg const *cfg)
+unsigned long
+coap_cfg_ack_random_factor_denominator(struct coap_cfg const *cfg)
 {
 	return cfg->ack_random_factor_demoninator;
 }
@@ -81,9 +83,7 @@ static size_t count_bytes(uint_fast64_t value)
 	size_t option_length = 8U;
 	for (; ii < 8U; ++ii) {
 		uint64_t offset = 8U * (7U - ii);
-		unsigned char byte =
-			(value >> offset) &
-			UINT64_C(0xFF);
+		unsigned char byte = (value >> offset) & UINT64_C(0xFF);
 		if (0 == byte) {
 			--option_length;
 			continue;
@@ -99,9 +99,7 @@ static void write_bytes(char *buf, uint_fast64_t value)
 
 	for (size_t ii = 0U; ii < bytes; ++ii) {
 		uint64_t offset = 8U * ii;
-		unsigned char byte =
-			(value >> offset) &
-			UINT64_C(0xFF);
+		unsigned char byte = (value >> offset) & UINT64_C(0xFF);
 		buf[bytes - 1U - ii] = byte;
 	}
 }
@@ -123,9 +121,8 @@ coap_error coap_header_encode(struct coap_logger *logger,
                               coap_code code, uint_fast16_t message_id,
                               uint_fast64_t token,
                               struct coap_option const *options,
-			      size_t options_size,
-                              bool have_payload, char *buffer,
-                              size_t buffer_size)
+                              size_t options_size, bool have_payload,
+                              char *buffer, size_t buffer_size)
 {
 	size_t encoded_size = 0U;
 
@@ -158,7 +155,8 @@ coap_error coap_header_encode(struct coap_logger *logger,
 	for (size_t ii = 0U; ii < options_size; ++ii) {
 		int coap_option_delta = options[ii].type - last_value;
 		if (coap_option_delta < 0) {
-			LOG(logger, "options out of order %lu", options[ii].type);
+			LOG(logger, "options out of order %lu",
+			    options[ii].type);
 			return COAP_ERROR_BAD_OPTION;
 		}
 
@@ -174,7 +172,8 @@ coap_error coap_header_encode(struct coap_logger *logger,
 		case COAP_OPTION_TYPE_URI_PATH:
 		case COAP_OPTION_TYPE_URI_QUERY: {
 			option_string = options[ii].value.string.buf;
-			size_t str_length = options[ii].value.string.size;
+			size_t str_length =
+			    options[ii].value.string.size;
 			if (str_length > 255U)
 				return COAP_ERROR_BAD_PACKET;
 			option_length = str_length;
@@ -230,7 +229,9 @@ coap_error coap_header_encode(struct coap_logger *logger,
 
 		switch (option_value_type) {
 		case COAP_OPTION_VALUE_UINT:
-			write_bytes(buffer + encoded_size - option_length, option_uint);
+			write_bytes(buffer + encoded_size -
+			                option_length,
+			            option_uint);
 			break;
 
 		case COAP_OPTION_VALUE_STRING:
@@ -257,9 +258,9 @@ size_overflow:
 }
 
 coap_error coap_header_decode_start(struct coap_decoder *decoder,
-				    struct coap_logger *logger,
-				    char const *message,
-				    size_t message_size)
+                                    struct coap_logger *logger,
+                                    char const *message,
+                                    size_t message_size)
 {
 	memset(decoder, 0, sizeof *decoder);
 
@@ -295,7 +296,8 @@ coap_error coap_header_decode_start(struct coap_decoder *decoder,
 
 	decoder->code = code;
 
-	uint_fast16_t message_id = decode_bytes((char *)header_bytes + 2U, 2U);
+	uint_fast16_t message_id =
+	    decode_bytes((char *)header_bytes + 2U, 2U);
 
 	decoder->message_id = message_id;
 
@@ -303,7 +305,8 @@ coap_error coap_header_decode_start(struct coap_decoder *decoder,
 	if (message_index > message_size)
 		return COAP_ERROR_BAD_PACKET;
 
-	uint_fast64_t token = decode_bytes(message + message_index - token_length, token_length);
+	uint_fast64_t token = decode_bytes(
+	    message + message_index - token_length, token_length);
 
 	decoder->token = token;
 
@@ -348,7 +351,7 @@ coap_error coap_header_decode_option(struct coap_decoder *decoder)
 		case 14U:
 		case 15U:
 			LOG(logger, "special delta options are not "
-			    "implemented");
+			            "implemented");
 			return COAP_ERROR_BAD_PACKET;
 		}
 		switch (option_length) {
@@ -358,7 +361,7 @@ coap_error coap_header_decode_option(struct coap_decoder *decoder)
 			if (message_index > message_size)
 				goto packet_too_small;
 			memcpy(&length_byte, message + message_index -
-			       sizeof length_byte,
+			                         sizeof length_byte,
 			       sizeof length_byte);
 			option_length = length_byte + 13U;
 			break;
@@ -367,7 +370,7 @@ coap_error coap_header_decode_option(struct coap_decoder *decoder)
 		case 14U:
 		case 15U:
 			LOG(logger, "special length options are not "
-			    "implemented");
+			            "implemented");
 			return COAP_ERROR_BAD_PACKET;
 		}
 		decoder->option_type += option_delta;
@@ -376,9 +379,11 @@ coap_error coap_header_decode_option(struct coap_decoder *decoder)
 		if (message_index > message_size)
 			goto malformed_packet;
 
-		char const*option_start = message + message_index - option_length;
+		char const *option_start =
+		    message + message_index - option_length;
 
-		bool critical_option = (decoder->option_type & (1U << 7U)) != 0U;
+		bool critical_option =
+		    (decoder->option_type & (1U << 7U)) != 0U;
 
 		bool repeatable;
 		switch (decoder->option_type) {
@@ -412,8 +417,8 @@ coap_error coap_header_decode_option(struct coap_decoder *decoder)
 				goto bad_option_error;
 			if (option_length > 255U) {
 				LOG(logger, "abnormally long "
-				    "Uri-Host option of "
-				    "size %lu encountered",
+				            "Uri-Host option of "
+				            "size %lu encountered",
 				    option_length);
 				goto bad_option_error;
 			}
@@ -425,13 +430,14 @@ coap_error coap_header_decode_option(struct coap_decoder *decoder)
 		case COAP_OPTION_TYPE_URI_PORT: {
 			if (option_length > 2U) {
 				LOG(logger, "abnormally long Uri-Port "
-				    "option of size %lu "
-				    "encountered",
+				            "option of size %lu "
+				            "encountered",
 				    option_length);
 				goto bad_option_error;
 			}
 
-			decoder->uint = decode_bytes(option_start, option_length);
+			decoder->uint =
+			    decode_bytes(option_start, option_length);
 			break;
 		}
 
@@ -445,8 +451,8 @@ coap_error coap_header_decode_option(struct coap_decoder *decoder)
 		case COAP_OPTION_TYPE_URI_QUERY:
 			if (option_length > 255U) {
 				LOG(logger, "abnormally long "
-				    "Uri-Query option of "
-				    "size %lu encountered",
+				            "Uri-Query option of "
+				            "size %lu encountered",
 				    option_length);
 				goto bad_option_error;
 			}
@@ -458,26 +464,28 @@ coap_error coap_header_decode_option(struct coap_decoder *decoder)
 		case COAP_OPTION_TYPE_CONTENT_FORMAT: {
 			if (option_length > 2U) {
 				LOG(logger, "abnormally long "
-				    "Content-Format option of "
-				    "size %lu encountered",
+				            "Content-Format option of "
+				            "size %lu encountered",
 				    option_length);
 				goto bad_option_error;
 			}
 
-			decoder->uint = decode_bytes(option_start, option_length);
+			decoder->uint =
+			    decode_bytes(option_start, option_length);
 			break;
 		}
 
 		case COAP_OPTION_TYPE_ACCEPT: {
 			if (option_length > 2U) {
 				LOG(logger, "abnormally long Accept "
-				    "option of size %lu "
-				    "encountered",
+				            "option of size %lu "
+				            "encountered",
 				    option_length);
 				goto bad_option_error;
 			}
 
-			decoder->uint = decode_bytes(option_start, option_length);
+			decoder->uint =
+			    decode_bytes(option_start, option_length);
 			break;
 		}
 
@@ -608,7 +616,8 @@ char const *coap_code_string(coap_code code)
 	}
 }
 
-char const *coap_content_format_string(coap_content_format content_format)
+char const *
+coap_content_format_string(coap_content_format content_format)
 {
 	switch (content_format) {
 	case COAP_CONTENT_FORMAT_TEXT_PLAIN_CHARSET_UTF_8:

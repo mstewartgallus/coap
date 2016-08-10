@@ -49,23 +49,12 @@ struct request {
 	bool acked;
 };
 
-
 #define ARRAY_SIZE(...) (sizeof __VA_ARGS__ / sizeof(__VA_ARGS__)[0U])
 
 static struct coap_logger my_logger;
 
-static unsigned long random_timeout_ms(struct coap_cfg const *cfg)
-{
-	unsigned long bottom = coap_cfg_ack_timeout_ms(cfg);
-	unsigned long top = (coap_cfg_ack_timeout_ms(cfg) *
-	                     coap_cfg_ack_random_factor_numerator(cfg)) /
-		coap_cfg_ack_random_factor_denominator(cfg);
-
-	/* This is not a perfectly uniform distribution but it is good
-	 * enough */
-
-	return random() % (top - bottom) + bottom;
-}
+static unsigned long random_timeout_ms(struct coap_cfg const *cfg);
+static int slurp_file(FILE *file, char **bufp, size_t *sizep);
 
 int main(int argc, char **argv)
 {
@@ -74,14 +63,19 @@ int main(int argc, char **argv)
 
 	bool print_help = false;
 	bool bad_invocation = false;
+	bool read_stdin = false;
 	for (;;) {
-		int opt = getopt(argc, argv, "h");
+		int opt = getopt(argc, argv, "hi");
 		if (-1 == opt)
 			break;
 
 		switch (opt) {
 		case 'h':
 			print_help = true;
+			break;
+
+		case 'i':
+			read_stdin = true;
 			break;
 
 		case '?':
@@ -92,12 +86,12 @@ int main(int argc, char **argv)
 	}
 
 	if (bad_invocation) {
-		fprintf(stderr, "Usage: %s [-h] URI\n", argv[0U]);
+		fprintf(stderr, "Usage: %s [-hi] URI\n", argv[0U]);
 		return EXIT_FAILURE;
 	}
 
 	if (print_help) {
-		fprintf(stdout, "Usage: %s [-h] URI\n", argv[0U]);
+		fprintf(stdout, "Usage: %s [-hi] URI\n", argv[0U]);
 		return EXIT_SUCCESS;
 	}
 
@@ -105,11 +99,11 @@ int main(int argc, char **argv)
 
 	size_t uris_count = argc - optind;
 	if (uris_count != 1) {
-		fprintf(stderr, "Usage: %s [-h] URI\n", argv[0U]);
+		fprintf(stderr, "Usage: %s [-hi] URI\n", argv[0U]);
 		return EXIT_FAILURE;
 	}
 
-	char const *uri = argv[1U];
+	char const *uri = argv[optind];
 
 	char *scheme_str;
 	char *hier;
@@ -192,6 +186,21 @@ int main(int argc, char **argv)
 	}
 
 	char const *service = port_str;
+
+	size_t stdin_size = 0U;
+	char *stdin_buf = 0;
+	if (read_stdin) {
+		char *xx;
+		size_t yy;
+		int err = slurp_file(stdin, &xx, &yy);
+		if (err != 0) {
+			errno = err;
+			perror("slurp_file");
+			return EXIT_FAILURE;
+		}
+		stdin_buf = xx;
+		stdin_size = yy;
+	}
 
 	struct addrinfo *addrinfo_head;
 	{
@@ -281,7 +290,8 @@ got_socket:
 	{
 		struct sockaddr_storage addr = {0};
 		socklen_t addr_size = sizeof addr;
-		if (-1 == getsockname(sockfd, (void *)&addr, &addr_size)) {
+		if (-1 ==
+		    getsockname(sockfd, (void *)&addr, &addr_size)) {
 			perror("getsockname");
 			return EXIT_FAILURE;
 		}
@@ -289,12 +299,16 @@ got_socket:
 		switch (addr.ss_family) {
 		case AF_INET: {
 			struct sockaddr_in *in_addr = (void *)&addr;
-			uint_fast16_t my_port = ntohs(in_addr->sin_port);
+			uint_fast16_t my_port =
+			    ntohs(in_addr->sin_port);
 
 			char buf[INET_ADDRSTRLEN + 1U] = {0};
-			inet_ntop(AF_INET, &in_addr->sin_addr, buf, sizeof buf);
-			fprintf(stdout, "Connected as %s://%s:%" PRIu16 "\n",
-				scheme_str, buf, (uint_least16_t)my_port);
+			inet_ntop(AF_INET, &in_addr->sin_addr, buf,
+			          sizeof buf);
+			fprintf(stdout,
+			        "Connected as %s://%s:%" PRIu16 "\n",
+			        scheme_str, buf,
+			        (uint_least16_t)my_port);
 			break;
 		}
 
@@ -304,9 +318,10 @@ got_socket:
 
 			char buf[INET6_ADDRSTRLEN + 1U] = {0};
 			inet_ntop(AF_INET6, &in6_addr->sin6_addr, buf,
-				  sizeof buf);
-			fprintf(stdout, "Connected as %s://[%s]:%" PRIu16 "\n",
-				scheme_str, buf, (uint_least16_t)port);
+			          sizeof buf);
+			fprintf(stdout,
+			        "Connected as %s://[%s]:%" PRIu16 "\n",
+			        scheme_str, buf, (uint_least16_t)port);
 			break;
 		}
 
@@ -384,12 +399,14 @@ got_socket:
 		}
 
 		options[ii].type = COAP_OPTION_TYPE_ACCEPT;
-		options[ii].value.uint = COAP_CONTENT_FORMAT_APPLICATION_JSON;
+		options[ii].value.uint =
+		    COAP_CONTENT_FORMAT_APPLICATION_JSON;
 		++ii;
 
-		fprintf(stderr, "sending message id 0x%" PRIx16 " token 0x%" PRIx64 "\n",
-			(uint_least16_t)message_id,
-			(uint_least64_t)token);
+		fprintf(stderr, "sending message id 0x%" PRIx16
+		                " token 0x%" PRIx64 "\n",
+		        (uint_least16_t)message_id,
+		        (uint_least64_t)token);
 
 		size_t encoded_size = 0U;
 
@@ -397,10 +414,10 @@ got_socket:
 		{
 			size_t xx = 0U;
 			err = coap_header_encode(
-				(struct coap_logger *)&my_logger, &xx, 1U,
-				message_type, COAP_CODE_REQUEST_GET,
-				message_id, token, options, ii, false, request.buf,
-				sizeof request.buf);
+			    (struct coap_logger *)&my_logger, &xx, 1U,
+			    message_type, COAP_CODE_REQUEST_GET,
+			    message_id, token, options, ii, read_stdin,
+			    request.buf, sizeof request.buf);
 			encoded_size = xx;
 		}
 		switch (err) {
@@ -420,24 +437,34 @@ got_socket:
 			return EXIT_FAILURE;
 		}
 
-		if (-1 == send(sockfd, request.buf, request.size, 0)) {
-			perror("send");
+		if (encoded_size + stdin_size > sizeof request.buf) {
+			fprintf(stderr, "too large\n");
 			return EXIT_FAILURE;
 		}
+
+		memcpy(request.buf + encoded_size, stdin_buf,
+		       stdin_size);
+		encoded_size += stdin_size;
 
 		request.message_id = message_id;
 		request.token = token;
 		request.timeout = random_timeout_ms(mycfg);
 		request.transmission_counter = 0;
 		request.size = encoded_size;
+
+		if (-1 == send(sockfd, request.buf, request.size, 0)) {
+			perror("send");
+			return EXIT_FAILURE;
+		}
 	}
 
 	for (;;) {
 		{
 			struct pollfd pollfds[] = {
-				{.fd = sockfd, .events = POLLIN}};
+			    {.fd = sockfd, .events = POLLIN}};
 			int nfds =
-				poll(pollfds, ARRAY_SIZE(pollfds), request.acked ? -1 : request.timeout);
+			    poll(pollfds, ARRAY_SIZE(pollfds),
+			         request.acked ? -1 : request.timeout);
 			if (nfds < 0) {
 				perror("poll");
 				return EXIT_FAILURE;
@@ -446,8 +473,8 @@ got_socket:
 				int xx;
 				socklen_t yy = sizeof xx;
 				if (-1 == getsockopt(sockfd, SOL_SOCKET,
-						     SO_ERROR, &xx,
-						     &yy)) {
+				                     SO_ERROR, &xx,
+				                     &yy)) {
 					perror("getsockopt");
 					return EXIT_FAILURE;
 				}
@@ -467,7 +494,8 @@ got_socket:
 
 		request.timeout *= 2;
 		++request.transmission_counter;
-		if (request.transmission_counter > coap_cfg_max_retransmit(mycfg)) {
+		if (request.transmission_counter >
+		    coap_cfg_max_retransmit(mycfg)) {
 			fprintf(stderr, "message timeout\n");
 			return EXIT_FAILURE;
 		}
@@ -477,7 +505,8 @@ got_socket:
 		;
 		size_t message_size;
 		{
-			ssize_t xx = recv(sockfd, recv_buf, sizeof recv_buf, 0);
+			ssize_t xx =
+			    recv(sockfd, recv_buf, sizeof recv_buf, 0);
 			if (xx < 0) {
 				perror("recv");
 				return EXIT_FAILURE;
@@ -487,14 +516,16 @@ got_socket:
 
 		struct coap_decoder decoder = {0};
 		{
-			coap_error err = coap_header_decode_start(&decoder,
-								  &my_logger, recv_buf, message_size);
+			coap_error err = coap_header_decode_start(
+			    &decoder, &my_logger, recv_buf,
+			    message_size);
 			switch (err) {
 			case 0:
 				break;
 
 			case COAP_ERROR_UNSUPPORTED_VERSION:
-				fprintf(stderr, "unsupported version\n");
+				fprintf(stderr,
+				        "unsupported version\n");
 				return EXIT_FAILURE;
 
 			case COAP_ERROR_BAD_PACKET:
@@ -517,9 +548,9 @@ got_socket:
 		fprintf(stderr, "\t%s\n", type_str);
 		fprintf(stderr, "\t%s\n", details);
 		fprintf(stderr, "\tMessage Id: 0x%" PRIx16 "\n",
-			(uint_least16_t)decoder.message_id);
+		        (uint_least16_t)decoder.message_id);
 		fprintf(stderr, "\tToken: 0x%" PRIx64 "\n",
-			(uint_least64_t)decoder.token);
+		        (uint_least64_t)decoder.token);
 
 		if (request.message_id != decoder.message_id) {
 			fprintf(stderr, "Bad message id ignoring!\n");
@@ -531,12 +562,14 @@ got_socket:
 			continue;
 		}
 
-		if (!request.acked && decoder.type != COAP_TYPE_ACKNOWLEDGEMENT) {
+		if (!request.acked &&
+		    decoder.type != COAP_TYPE_ACKNOWLEDGEMENT) {
 			fprintf(stderr, "Not an ack!\n");
 			continue;
 		}
 
-		if (request.acked && decoder.type == COAP_TYPE_ACKNOWLEDGEMENT) {
+		if (request.acked &&
+		    decoder.type == COAP_TYPE_ACKNOWLEDGEMENT) {
 			fprintf(stderr, "Is an ack!\n");
 			continue;
 		}
@@ -554,16 +587,20 @@ got_socket:
 				content_format = decoder.uint;
 				content_format_set = true;
 
-				char const *content_str = coap_content_format_string(content_format);
+				char const *content_str =
+				    coap_content_format_string(
+				        content_format);
 				if (0 == content_str) {
-					fprintf(stderr,
-						"\tContent-Format: %" PRIu64
-						"\n",
-						content_format);
+					fprintf(
+					    stderr,
+					    "\tContent-Format: %" PRIu64
+					    "\n",
+					    content_format);
 				} else {
-					fprintf(stderr,
-						"\tContent-Format: %s\n",
-						content_str);
+					fprintf(
+					    stderr,
+					    "\tContent-Format: %s\n",
+					    content_str);
 				}
 				break;
 			}
@@ -577,13 +614,14 @@ got_socket:
 
 	process_payload:
 		fprintf(stderr, "%s\n",
-			strndup(recv_buf + decoder.header_size,
+		        strndup(recv_buf + decoder.header_size,
 		                message_size - decoder.header_size));
 
 		if (!content_format_set) {
 			fprintf(stderr, "\tContent-Format not set\n");
 		}
-		if (content_format != COAP_CONTENT_FORMAT_APPLICATION_JSON) {
+		if (content_format !=
+		    COAP_CONTENT_FORMAT_APPLICATION_JSON) {
 			fprintf(stderr, "\tUnknown content format\n");
 		}
 
@@ -601,6 +639,68 @@ got_socket:
 	}
 
 	return EXIT_SUCCESS;
+}
+
+static unsigned long random_timeout_ms(struct coap_cfg const *cfg)
+{
+	unsigned long bottom = coap_cfg_ack_timeout_ms(cfg);
+	unsigned long top =
+	    (coap_cfg_ack_timeout_ms(cfg) *
+	     coap_cfg_ack_random_factor_numerator(cfg)) /
+	    coap_cfg_ack_random_factor_denominator(cfg);
+
+	/* This is not a perfectly uniform distribution but it is good
+	 * enough */
+
+	return random() % (top - bottom) + bottom;
+}
+
+static int slurp_file(FILE *file, char **bufp, size_t *sizep)
+{
+	size_t buf_size = 1024U;
+	size_t bytes_read = 0;
+
+	int err = 0;
+
+	char *buf = malloc(buf_size);
+	if (0 == buf) {
+		return errno;
+	}
+
+	flockfile(file);
+	for (;;) {
+		size_t bytes_to_read = buf_size - bytes_read;
+		size_t read_bytes =
+		    fread_unlocked(buf, 1U, bytes_to_read, file);
+
+		if (ferror_unlocked(file)) {
+			return errno;
+		}
+		bytes_read += read_bytes;
+		if (read_bytes < bytes_to_read) {
+			break;
+		}
+		char *new_ptr = realloc(buf, 2 * buf_size);
+		if (new_ptr != 0) {
+			err = errno;
+			free(buf);
+			return err;
+		}
+		buf = new_ptr;
+		buf_size = 2 * buf_size;
+	}
+	funlockfile(file);
+
+	if (0 == freopen("/dev/null", "rw", file)) {
+		err = errno;
+		free(buf);
+		return err;
+	}
+
+	*bufp = buf;
+	*sizep = bytes_read;
+
+	return 0;
 }
 
 static void my_log(struct coap_logger *logger, char const *format, ...);

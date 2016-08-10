@@ -55,7 +55,7 @@ enum { COAP_CODE_RESPONSE_CLIENT_ERROR_BAD_REQUEST = (4U << 5U) | 0U,
 };
 enum { COAP_CODE_RESPONSE_INTERNAL_SERVER_ERROR_NOT_IMPLEMENTED =
 	   (5U << 5U) | 1U,
-      COAP_CODE_RESPONSE_INTERNAL_SERVER_ERROR_BAD_GATEWAY =
+       COAP_CODE_RESPONSE_INTERNAL_SERVER_ERROR_BAD_GATEWAY =
 	   (5U << 5U) | 2U,
        COAP_CODE_RESPONSE_INTERNAL_SERVER_ERROR_SERVICE_UNAVAILABLE =
 	   (5U << 5U) | 3U,
@@ -148,8 +148,10 @@ struct coap_cfg;
 struct coap_cfg const *coap_cfg_default(void);
 
 unsigned long coap_cfg_ack_timeout_ms(struct coap_cfg const *cfg);
-unsigned long coap_cfg_ack_random_factor_numerator(struct coap_cfg const *cfg);
-unsigned long coap_cfg_ack_random_factor_denominator(struct coap_cfg const *cfg);
+unsigned long
+coap_cfg_ack_random_factor_numerator(struct coap_cfg const *cfg);
+unsigned long
+coap_cfg_ack_random_factor_denominator(struct coap_cfg const *cfg);
 uint_fast8_t coap_cfg_max_retransmit(struct coap_cfg const *cfg);
 
 coap_error coap_header_encode(struct coap_logger *logger,
@@ -158,16 +160,14 @@ coap_error coap_header_encode(struct coap_logger *logger,
                               coap_code code, uint_fast16_t message_id,
                               uint_fast64_t token,
                               struct coap_option const *options,
-			      size_t options_size,
-                              _Bool has_payload, char *buffer,
-                              size_t buffer_size);
+                              size_t options_size, _Bool has_payload,
+                              char *buffer, size_t buffer_size);
 
 coap_error coap_header_decode_start(struct coap_decoder *decoder,
-				    struct coap_logger *logger,
-				    char const *message,
-				    size_t message_size);
+                                    struct coap_logger *logger,
+                                    char const *message,
+                                    size_t message_size);
 coap_error coap_header_decode_option(struct coap_decoder *decoder);
-
 
 char const *coap_type_string(coap_type type);
 char const *coap_code_string(coap_code code);

@@ -83,8 +83,7 @@ struct listener {
 	int socket_error;
 };
 
-static short sock_poll(struct listener *listener, int fd,
-                              short flags);
+static short sock_poll(struct listener *listener, int fd, short flags);
 static void sock_fail(struct listener *listener, int err);
 
 static void process_sockfd(struct listener *listener);
@@ -161,8 +160,7 @@ int main(int argc, char **argv)
 		return EXIT_FAILURE;
 	}
 
-	struct pollfd *pollfds =
-	    calloc(uris_count, sizeof pollfds[0U]);
+	struct pollfd *pollfds = calloc(uris_count, sizeof pollfds[0U]);
 	if (0 == pollfds) {
 		perror("calloc");
 		return EXIT_FAILURE;
@@ -466,19 +464,27 @@ int main(int argc, char **argv)
 	for (size_t ii = 0U; ii < uris_count; ++ii) {
 
 		void *stack = mmap(0, 20U * sysconf(_SC_PAGE_SIZE),
-				   PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_GROWSDOWN | MAP_STACK, -1, 0);;
+		                   PROT_READ | PROT_WRITE,
+		                   MAP_PRIVATE | MAP_ANONYMOUS |
+		                       MAP_GROWSDOWN | MAP_STACK,
+		                   -1, 0);
+		;
 		if (MAP_FAILED == stack) {
 			perror("mmap");
 			return EXIT_FAILURE;
 		}
 
 		listeners[ii].server = &server;
-		memset(&listeners[ii].context, 0, sizeof listeners[ii].context);
+		memset(&listeners[ii].context, 0,
+		       sizeof listeners[ii].context);
 		getcontext(&listeners[ii].context);
 		listeners[ii].context.uc_stack.ss_sp = stack;
-		listeners[ii].context.uc_stack.ss_size = 20U * sysconf(_SC_PAGE_SIZE);
+		listeners[ii].context.uc_stack.ss_size =
+		    20U * sysconf(_SC_PAGE_SIZE);
 
-		makecontext(&listeners[ii].context, (void(*)(void))process_sockfd, 1, &listeners[ii]);
+		makecontext(&listeners[ii].context,
+		            (void (*)(void))process_sockfd, 1,
+		            &listeners[ii]);
 	}
 
 	for (;;) {
@@ -500,11 +506,11 @@ int main(int argc, char **argv)
 
 			listeners[ii].do_poll = false;
 			for (;;) {
-				swapcontext(&server.poll_context, &listeners[ii].context);
+				swapcontext(&server.poll_context,
+				            &listeners[ii].context);
 				if (listeners[ii].do_poll)
 					break;
 			}
-
 
 			--nfds;
 			if (0 == nfds)
@@ -532,11 +538,10 @@ int main(int argc, char **argv)
 	return exit_status;
 }
 
-enum {
-	RESPONSE_ERROR,
+enum { RESPONSE_ERROR,
 
-	RESPONSE_EMPTY,
-	RESPONSE_SUCCESS,
+       RESPONSE_EMPTY,
+       RESPONSE_SUCCESS,
 };
 typedef unsigned char response;
 
@@ -565,8 +570,9 @@ static void process_sockfd(struct listener *listener)
 			socklen_t xx = sizeof *from_addr;
 
 			ssize_t maybe_message_size =
-				recvfrom(sockfd, recv_buffer, RECV_BUFFER_SIZE, MSG_DONTWAIT,
-					 (struct sockaddr *)from_addr, &xx);
+			    recvfrom(sockfd, recv_buffer,
+			             RECV_BUFFER_SIZE, MSG_DONTWAIT,
+			             (struct sockaddr *)from_addr, &xx);
 
 			if (maybe_message_size < 0) {
 				error = errno;
@@ -616,7 +622,8 @@ static void process_sockfd(struct listener *listener)
 		}
 
 		default:
-			fprintf(stderr, "Received message from unknown address family\n");
+			fprintf(stderr, "Received message from unknown "
+			                "address family\n");
 			break;
 		}
 
@@ -624,22 +631,26 @@ static void process_sockfd(struct listener *listener)
 
 		coap_code response_code;
 		{
-			coap_error err = coap_header_decode_start(&decoder,
-							       logger, recv_buffer, message_size);
+			coap_error err = coap_header_decode_start(
+			    &decoder, logger, recv_buffer,
+			    message_size);
 			switch (err) {
 			case 0:
 				break;
 
 			case COAP_ERROR_UNSUPPORTED_VERSION:
-				response_code = COAP_CODE_RESPONSE_CLIENT_ERROR_BAD_REQUEST;
+				response_code =
+				    COAP_CODE_RESPONSE_CLIENT_ERROR_BAD_REQUEST;
 				goto setup_response;
 
 			case COAP_ERROR_BAD_PACKET:
-				response_code = COAP_CODE_RESPONSE_CLIENT_ERROR_BAD_REQUEST;
+				response_code =
+				    COAP_CODE_RESPONSE_CLIENT_ERROR_BAD_REQUEST;
 				goto setup_response;
 
 			case COAP_ERROR_BAD_OPTION:
-				response_code = COAP_CODE_RESPONSE_CLIENT_ERROR_BAD_OPTION;
+				response_code =
+				    COAP_CODE_RESPONSE_CLIENT_ERROR_BAD_OPTION;
 				goto setup_response;
 			}
 
@@ -649,12 +660,15 @@ static void process_sockfd(struct listener *listener)
 				break;
 
 			default:
-				response_code = COAP_CODE_RESPONSE_CLIENT_ERROR_METHOD_NOT_FOUND;
+				response_code =
+				    COAP_CODE_RESPONSE_CLIENT_ERROR_METHOD_NOT_FOUND;
 				goto setup_response;
 			}
 
-			char const *type_str = coap_type_string(decoder.type);
-			char const *request_str = coap_code_string(decoder.code);
+			char const *type_str =
+			    coap_type_string(decoder.type);
+			char const *request_str =
+			    coap_code_string(decoder.code);
 
 			fprintf(stderr, "Received COAP request:\n");
 			fprintf(stderr, "\t%s\n", type_str);
@@ -681,17 +695,19 @@ static void process_sockfd(struct listener *listener)
 					break;
 
 				case COAP_OPTION_TYPE_URI_PATH:
-					memcpy(buf, decoder.str.str, decoder.str.size);
-					fprintf(
-					    stderr, "\tUri-Path: %s\n",
-					    buf);
+					memcpy(buf, decoder.str.str,
+					       decoder.str.size);
+					fprintf(stderr,
+					        "\tUri-Path: %s\n",
+					        buf);
 					break;
 
 				case COAP_OPTION_TYPE_URI_HOST:
-					memcpy(buf, decoder.str.str, decoder.str.size);
-					fprintf(
-					    stderr, "\tUri-Host: %s\n",
-					    buf);
+					memcpy(buf, decoder.str.str,
+					       decoder.str.size);
+					fprintf(stderr,
+					        "\tUri-Host: %s\n",
+					        buf);
 					break;
 
 				case COAP_OPTION_TYPE_URI_PORT:
@@ -702,44 +718,55 @@ static void process_sockfd(struct listener *listener)
 					break;
 
 				case COAP_OPTION_TYPE_URI_QUERY:
-					memcpy(buf, decoder.str.str, decoder.str.size);
-					fprintf(
-					    stderr, "\tUri-Query: %s\n",
-					    buf);
+					memcpy(buf, decoder.str.str,
+					       decoder.str.size);
+					fprintf(stderr,
+					        "\tUri-Query: %s\n",
+					        buf);
 					break;
 
 				case COAP_OPTION_TYPE_ACCEPT: {
-					acceptable_format = decoder.uint;
+					acceptable_format =
+					    decoder.uint;
 					acceptable_format_set = true;
 
-					char const *str = coap_content_format_string(acceptable_format);
+					char const *str =
+					    coap_content_format_string(
+					        acceptable_format);
 					if (0 == str) {
-						fprintf(stderr, "\tAccept: "
-					                "%" PRIu64 "\n",
-							(uint_least64_t)
-							acceptable_format);
+						fprintf(
+						    stderr,
+						    "\tAccept: "
+						    "%" PRIu64 "\n",
+						    (uint_least64_t)
+						        acceptable_format);
 					} else {
-						fprintf(stderr, "\tAccept: %s\n",
-							str);
+						fprintf(
+						    stderr,
+						    "\tAccept: %s\n",
+						    str);
 					}
 					break;
 				}
 				}
 			}
-			fprintf(stderr, "\n");
-		}
-
-		/* Reject invalid messages */
-		if (decoder.has_payload) {
-			response_code = COAP_CODE_RESPONSE_CLIENT_ERROR_BAD_REQUEST;
-			goto setup_response;
 		}
 
 		/* Just ignore these */
 		if (decoder.type != COAP_TYPE_CONFIRMABLE) {
-			response_code = COAP_CODE_RESPONSE_CLIENT_ERROR_BAD_REQUEST;
+			response_code =
+			    COAP_CODE_RESPONSE_CLIENT_ERROR_BAD_REQUEST;
 			goto setup_response;
 		}
+
+		if (decoder.has_payload) {
+			for (size_t ii = decoder.message_index;
+			     ii < decoder.message_size; ++ii) {
+				fputc(recv_buffer[ii], stderr);
+			}
+			fputc('\n', stderr);
+		}
+		fprintf(stderr, "\n");
 
 		size_t encoded_size = 0U;
 
@@ -749,12 +776,11 @@ static void process_sockfd(struct listener *listener)
 			{
 				size_t xx = 0U;
 				err = coap_header_encode(
-					logger, &xx, 1U,
-					COAP_TYPE_ACKNOWLEDGEMENT,
-					COAP_CODE_EMPTY,
-					decoder.message_id, 0,
-					0, 0U,
-					true, send_buffer, SEND_BUFFER_SIZE);
+				    logger, &xx, 1U,
+				    COAP_TYPE_ACKNOWLEDGEMENT,
+				    COAP_CODE_EMPTY, decoder.message_id,
+				    0, 0, 0U, true, send_buffer,
+				    SEND_BUFFER_SIZE);
 				header_size = xx;
 			}
 			assert(err != COAP_ERROR_UNSUPPORTED_VERSION);
@@ -768,8 +794,10 @@ static void process_sockfd(struct listener *listener)
 
 		response_code = COAP_CODE_RESPONSE_SUCCESS_CONTENT;
 
-		if (acceptable_format != COAP_CONTENT_FORMAT_APPLICATION_JSON) {
-			response_code = COAP_CODE_RESPONSE_CLIENT_ERROR_UNSUPPORTED_CONTENT_FORMAT;
+		if (acceptable_format !=
+		    COAP_CONTENT_FORMAT_APPLICATION_JSON) {
+			response_code =
+			    COAP_CODE_RESPONSE_CLIENT_ERROR_UNSUPPORTED_CONTENT_FORMAT;
 			goto setup_response;
 		}
 
@@ -799,24 +827,23 @@ static void process_sockfd(struct listener *listener)
 		}
 
 		{
-			static struct coap_option const options[] ={
-				{
-				.type = COAP_OPTION_TYPE_CONTENT_FORMAT,
-				.value = {.uint = COAP_CONTENT_FORMAT_APPLICATION_JSON}
-				}
-			};
+			static struct coap_option const options[] = {
+			    {.type = COAP_OPTION_TYPE_CONTENT_FORMAT,
+			     .value = {
+			         .uint =
+			             COAP_CONTENT_FORMAT_APPLICATION_JSON}}};
 
 			coap_error err;
 			size_t header_size;
 			{
 				size_t xx = 0U;
 				err = coap_header_encode(
-					logger, &xx, 1U,
-					COAP_TYPE_ACKNOWLEDGEMENT,
-					response_code,
-					decoder.message_id, decoder.token,
-					options, ARRAY_SIZE(options),
-					true, send_buffer, SEND_BUFFER_SIZE);
+				    logger, &xx, 1U,
+				    COAP_TYPE_ACKNOWLEDGEMENT,
+				    response_code, decoder.message_id,
+				    decoder.token, options,
+				    ARRAY_SIZE(options), true,
+				    send_buffer, SEND_BUFFER_SIZE);
 				header_size = xx;
 			}
 			assert(err != COAP_ERROR_UNSUPPORTED_VERSION);
@@ -828,22 +855,25 @@ static void process_sockfd(struct listener *listener)
 
 			if (response_code != COAP_CODE_EMPTY) {
 				/* Dummy payload */
-				static char const payload[] = "{ 'hello' : 'world' }";
+				static char const payload[] =
+				    "{ 'hello' : 'world' }";
 
 				encoded_size += sizeof payload - 1U;
 
-				assert (encoded_size <= SEND_BUFFER_SIZE);
+				assert(encoded_size <=
+				       SEND_BUFFER_SIZE);
 
-				memcpy(send_buffer + encoded_size - sizeof payload + 1U,
+				memcpy(send_buffer + encoded_size -
+				           sizeof payload + 1U,
 				       payload, sizeof payload - 1U);
 			}
 		}
 	send:
 		for (;;) {
 			if (sendto(sockfd, send_buffer, encoded_size,
-					 MSG_DONTWAIT | MSG_NOSIGNAL,
-					 (void *)from_addr,
-					 sizeof *from_addr) != -1) {
+			           MSG_DONTWAIT | MSG_NOSIGNAL,
+			           (void *)from_addr,
+			           sizeof *from_addr) != -1) {
 				break;
 			}
 
@@ -859,25 +889,26 @@ static void process_sockfd(struct listener *listener)
 
 			if (error != 0) {
 				perror("sendto");
-				 sock_fail(listener, errno);
+				sock_fail(listener, errno);
 			}
 
-			short rflags = sock_poll(listener, sockfd, POLLOUT);
+			short rflags =
+			    sock_poll(listener, sockfd, POLLOUT);
 
 			if ((rflags & POLLHUP) != 0)
-				 sock_fail(listener, errno);
+				sock_fail(listener, errno);
 		}
 	}
 }
 
-static short sock_poll(struct listener *listener, int fd,
-			      short flags)
+static short sock_poll(struct listener *listener, int fd, short flags)
 {
 	listener->do_poll = true;
 	listener->pollfd[0].fd = fd;
 	listener->pollfd[0].events = flags;
 
-	swapcontext(&listener->context, &listener->server->poll_context);
+	swapcontext(&listener->context,
+	            &listener->server->poll_context);
 
 	return listener->pollfd[0].revents;
 }
@@ -887,7 +918,8 @@ static void sock_fail(struct listener *listener, int err)
 	listener->socket_error = err;
 	listener->do_fail = true;
 
-	swapcontext(&listener->context, &listener->server->poll_context);
+	swapcontext(&listener->context,
+	            &listener->server->poll_context);
 }
 
 static void my_log(struct coap_logger *logger, char const *format, ...)

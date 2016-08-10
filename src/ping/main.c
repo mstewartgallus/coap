@@ -56,13 +56,13 @@ struct config {
 static struct config const *default_config(void)
 {
 	static struct config const default_config = {
-		.ack_timeout_ns = 2U * 10000000U,
-		.ack_random_factor_numerator = 3,
-		.ack_random_factor_demoninator = 2,
-		.max_retransmit = 4U,
-		.nstart = 1U,
-		.default_leisure_ns = 5U * 10000000U,
-		.probing_rate = 1U};
+	    .ack_timeout_ns = 2U * 10000000U,
+	    .ack_random_factor_numerator = 3,
+	    .ack_random_factor_demoninator = 2,
+	    .max_retransmit = 4U,
+	    .nstart = 1U,
+	    .default_leisure_ns = 5U * 10000000U,
+	    .probing_rate = 1U};
 	return &default_config;
 }
 
@@ -93,7 +93,7 @@ static unsigned long random_timeout_ms(struct config const *config)
 	unsigned long bottom = ack_timeout_ms(config);
 	unsigned long top = (ack_timeout_ms(config) *
 	                     ack_random_factor_numerator(config)) /
-		ack_random_factor_denominator(config);
+	                    ack_random_factor_denominator(config);
 
 	/* This is not a perfectly uniform distribution but it is good
 	 * enough */
@@ -313,7 +313,8 @@ got_socket:
 	{
 		struct sockaddr_storage addr = {0};
 		socklen_t addr_size = sizeof addr;
-		if (-1 == getsockname(sockfd, (void *)&addr, &addr_size)) {
+		if (-1 ==
+		    getsockname(sockfd, (void *)&addr, &addr_size)) {
 			perror("getsockname");
 			return EXIT_FAILURE;
 		}
@@ -321,12 +322,16 @@ got_socket:
 		switch (addr.ss_family) {
 		case AF_INET: {
 			struct sockaddr_in *in_addr = (void *)&addr;
-			uint_fast16_t my_port = ntohs(in_addr->sin_port);
+			uint_fast16_t my_port =
+			    ntohs(in_addr->sin_port);
 
 			char buf[INET_ADDRSTRLEN + 1U] = {0};
-			inet_ntop(AF_INET, &in_addr->sin_addr, buf, sizeof buf);
-			fprintf(stdout, "Connected as %s://%s:%" PRIu16 "\n",
-				scheme_str, buf, (uint_least16_t)my_port);
+			inet_ntop(AF_INET, &in_addr->sin_addr, buf,
+			          sizeof buf);
+			fprintf(stdout,
+			        "Connected as %s://%s:%" PRIu16 "\n",
+			        scheme_str, buf,
+			        (uint_least16_t)my_port);
 			break;
 		}
 
@@ -336,9 +341,10 @@ got_socket:
 
 			char buf[INET6_ADDRSTRLEN + 1U] = {0};
 			inet_ntop(AF_INET6, &in6_addr->sin6_addr, buf,
-				  sizeof buf);
-			fprintf(stdout, "Connected as %s://[%s]:%" PRIu16 "\n",
-				scheme_str, buf, (uint_least16_t)port);
+			          sizeof buf);
+			fprintf(stdout,
+			        "Connected as %s://[%s]:%" PRIu16 "\n",
+			        scheme_str, buf, (uint_least16_t)port);
 			break;
 		}
 
@@ -387,10 +393,10 @@ got_socket:
 		{
 			size_t xx = 0U;
 			err = coap_header_encode(
-				(struct coap_logger *)&my_logger, &xx, 1U,
-				COAP_TYPE_CONFIRMABLE, COAP_CODE_EMPTY,
-				ping_message_id, 0, 0, 0U, false, message,
-				sizeof message);
+			    (struct coap_logger *)&my_logger, &xx, 1U,
+			    COAP_TYPE_CONFIRMABLE, COAP_CODE_EMPTY,
+			    ping_message_id, 0, 0, 0U, false, message,
+			    sizeof message);
 			encoded_size = xx;
 		}
 		switch (err) {
@@ -421,9 +427,9 @@ got_socket:
 		unsigned long transmission_counter = 0U;
 		for (;;) {
 			struct pollfd pollfds[] = {
-				{.fd = sockfd, .events = POLLIN}};
+			    {.fd = sockfd, .events = POLLIN}};
 			int nfds =
-				poll(pollfds, ARRAY_SIZE(pollfds), timeout);
+			    poll(pollfds, ARRAY_SIZE(pollfds), timeout);
 			if (nfds < 0) {
 				perror("poll");
 				return EXIT_FAILURE;
@@ -432,8 +438,8 @@ got_socket:
 				int xx;
 				socklen_t yy = sizeof xx;
 				if (-1 == getsockopt(sockfd, SOL_SOCKET,
-						     SO_ERROR, &xx,
-						     &yy)) {
+				                     SO_ERROR, &xx,
+				                     &yy)) {
 					perror("getsockopt");
 					return EXIT_FAILURE;
 				}
@@ -453,7 +459,8 @@ got_socket:
 				return EXIT_FAILURE;
 			}
 
-			if (-1 == send(sockfd, message, encoded_size, 0)) {
+			if (-1 ==
+			    send(sockfd, message, encoded_size, 0)) {
 				perror("send");
 				return EXIT_FAILURE;
 			}
@@ -473,8 +480,8 @@ got_socket:
 	}
 
 	struct coap_decoder decoder = {0};
-	coap_error err = coap_header_decode_start(&decoder,
-						  &my_logger, buf, message_size);
+	coap_error err = coap_header_decode_start(&decoder, &my_logger,
+	                                          buf, message_size);
 	switch (err) {
 	case 0:
 		break;
@@ -504,8 +511,7 @@ got_socket:
 
 	char const *type_str = coap_type_string(decoder.type);
 
-	char const *details =
-		coap_code_string(decoder.code);
+	char const *details = coap_code_string(decoder.code);
 	if (0 == details)
 		details = "unknown response code detail";
 

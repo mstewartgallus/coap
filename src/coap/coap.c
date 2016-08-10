@@ -77,6 +77,13 @@ uint_fast8_t coap_cfg_max_retransmit(struct coap_cfg const *cfg)
 	return cfg->max_retransmit;
 }
 
+void coap_empty_packet(coap_type type, uint_fast16_t message_id,
+                       char *buffer)
+{
+	coap_header_encode(0, 0, 1U, type, COAP_CODE_EMPTY, message_id,
+	                   0, 0, 0U, false, buffer, 4U);
+}
+
 static size_t count_bytes(uint_fast64_t value)
 {
 	size_t ii = 0U;
@@ -250,7 +257,8 @@ coap_error coap_header_encode(struct coap_logger *logger,
 		       &options_end, sizeof options_end);
 	}
 
-	*header_sizep = encoded_size;
+	if (header_sizep != 0)
+		*header_sizep = encoded_size;
 	return 0;
 
 size_overflow:

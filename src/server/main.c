@@ -84,7 +84,8 @@ struct listener {
 };
 
 static int bind_to_service(char const *service, char const *node,
-                           int *sockfdp, struct addrinfo const *hints);
+                           int *sockfdp, struct addrinfo const *hints,
+                           int sockflags);
 
 static short sock_poll(struct listener *listener, int fd, short flags);
 static void sock_fail(struct listener *listener, int err);
@@ -297,8 +298,9 @@ int main(int argc, char **argv)
 		int sockfd = -1;
 		{
 			int xx;
-			int err =
-			    bind_to_service(service, node, &xx, &hints);
+			int err = bind_to_service(
+			    service, node, &xx, &hints,
+			    SOCK_CLOEXEC | SOCK_NONBLOCK);
 			if (err != 0) {
 				errno = err;
 				perror("bind_to_service");
@@ -690,24 +692,10 @@ static void process_sockfd(struct listener *listener)
 		size_t encoded_size = 0U;
 
 		if (COAP_CODE_EMPTY == decoder.code) {
-			coap_error err;
-			size_t header_size;
-			{
-				size_t xx = 0U;
-				err = coap_header_encode(
-				    logger, &xx, 1U,
-				    COAP_TYPE_ACKNOWLEDGEMENT,
-				    COAP_CODE_EMPTY, decoder.message_id,
-				    0, 0, 0U, true, send_buffer,
-				    SEND_BUFFER_SIZE);
-				header_size = xx;
-			}
-			assert(err != COAP_ERROR_UNSUPPORTED_VERSION);
-			assert(err != COAP_ERROR_BAD_PACKET);
-			assert(err != COAP_ERROR_BAD_OPTION);
-			assert(0 == err);
-
-			encoded_size = header_size;
+			coap_empty_packet(COAP_TYPE_ACKNOWLEDGEMENT,
+			                  decoder.message_id,
+			                  send_buffer);
+			encoded_size = COAP_EMPTY_PACKET_SIZE;
 			goto send;
 		}
 
@@ -821,7 +809,8 @@ static void process_sockfd(struct listener *listener)
 }
 
 static int bind_to_service(char const *service, char const *node,
-                           int *sockfdp, struct addrinfo const *hints)
+                           int *sockfdp, struct addrinfo const *hints,
+                           int sockflags)
 {
 	int err = 0;
 
@@ -845,10 +834,8 @@ static int bind_to_service(char const *service, char const *node,
 	struct addrinfo *aip;
 	for (aip = addrinfo_head; aip != 0; aip = aip->ai_next) {
 		sa_family_t family = aip->ai_family;
-		sockfd =
-		    socket(family, aip->ai_socktype | SOCK_CLOEXEC |
-		                       SOCK_NONBLOCK,
-		           aip->ai_protocol);
+		sockfd = socket(family, aip->ai_socktype | sockflags,
+		                aip->ai_protocol);
 		if (sockfd < 0) {
 			err = errno;
 			switch (err) {

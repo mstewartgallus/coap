@@ -386,36 +386,9 @@ got_socket:
 	uint_fast16_t ping_message_id = random() % UINT16_MAX;
 
 	char message[4U] = {0};
-	size_t encoded_size = 0U;
-	{
-
-		coap_error err;
-		{
-			size_t xx = 0U;
-			err = coap_header_encode(
-			    (struct coap_logger *)&my_logger, &xx, 1U,
-			    COAP_TYPE_CONFIRMABLE, COAP_CODE_EMPTY,
-			    ping_message_id, 0, 0, 0U, false, message,
-			    sizeof message);
-			encoded_size = xx;
-		}
-		switch (err) {
-		case 0:
-			break;
-
-		case COAP_ERROR_UNSUPPORTED_VERSION:
-			fprintf(stderr, "unsupported version\n");
-			return EXIT_FAILURE;
-
-		case COAP_ERROR_BAD_PACKET:
-			fprintf(stderr, "bad packet\n");
-			return EXIT_FAILURE;
-
-		case COAP_ERROR_BAD_OPTION:
-			fprintf(stderr, "bad option\n");
-			return EXIT_FAILURE;
-		}
-	}
+	coap_empty_packet(COAP_TYPE_CONFIRMABLE, ping_message_id,
+	                  message);
+	size_t encoded_size = COAP_EMPTY_PACKET_SIZE;
 
 	if (-1 == send(sockfd, message, encoded_size, 0)) {
 		perror("send");

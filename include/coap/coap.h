@@ -143,6 +143,8 @@ struct coap_decoder {
 	};
 };
 
+enum { COAP_EMPTY_PACKET_SIZE = 4 };
+
 struct coap_cfg;
 
 struct coap_cfg const *coap_cfg_default(void);
@@ -153,6 +155,9 @@ coap_cfg_ack_random_factor_numerator(struct coap_cfg const *cfg);
 unsigned long
 coap_cfg_ack_random_factor_denominator(struct coap_cfg const *cfg);
 uint_fast8_t coap_cfg_max_retransmit(struct coap_cfg const *cfg);
+
+void coap_empty_packet(coap_type type, uint_fast16_t message_id,
+                       char *buffer);
 
 coap_error coap_header_encode(struct coap_logger *logger,
                               size_t *header_sizep,

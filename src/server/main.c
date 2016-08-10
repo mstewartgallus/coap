@@ -83,6 +83,9 @@ struct listener {
 	int socket_error;
 };
 
+static int bind_to_service(char const *service, char const *node,
+                           int *sockfdp, struct addrinfo const *hints);
+
 static short sock_poll(struct listener *listener, int fd, short flags);
 static void sock_fail(struct listener *listener, int err);
 
@@ -285,108 +288,26 @@ int main(int argc, char **argv)
 		char const *node = listener->node;
 		uint_fast16_t port = listener->port;
 
-		struct addrinfo *addrinfo_head;
+		struct addrinfo hints = {0};
+
+		hints.ai_flags = AI_PASSIVE;
+		hints.ai_family = AF_UNSPEC;
+		hints.ai_socktype = SOCK_DGRAM;
+
+		int sockfd = -1;
 		{
-			struct addrinfo *xx;
-			struct addrinfo hints = {0};
-
-			hints.ai_flags = AI_PASSIVE | AI_CANONNAME;
-			hints.ai_family = AF_UNSPEC;
-			hints.ai_socktype = SOCK_DGRAM;
-
-			error = getaddrinfo(node, service, &hints, &xx);
-			if (error != 0) {
-				if (EAI_SYSTEM == error) {
-					perror("getaddrinfo");
-				} else {
-					fprintf(stderr,
-					        "%s: getaddrinfo: %s\n",
-					        argv[0U],
-					        gai_strerror(error));
-				}
+			int xx;
+			int err =
+			    bind_to_service(service, node, &xx, &hints);
+			if (err != 0) {
+				errno = err;
+				perror("bind_to_service");
 				return EXIT_FAILURE;
 			}
-			addrinfo_head = xx;
+			sockfd = xx;
 		}
-
-		int sockfd;
-		struct addrinfo *aip;
-		for (aip = addrinfo_head; aip != 0;
-		     aip = aip->ai_next) {
-			sa_family_t family = aip->ai_family;
-			sockfd = socket(family, aip->ai_socktype |
-			                            SOCK_CLOEXEC |
-			                            SOCK_NONBLOCK,
-			                aip->ai_protocol);
-			if (sockfd < 0) {
-				switch (errno) {
-				case EAFNOSUPPORT:
-				case EPROTONOSUPPORT:
-					if (aip->ai_next)
-						continue;
-
-					perror("socket");
-					return EXIT_FAILURE;
-
-				default:
-					perror("socket");
-					return EXIT_FAILURE;
-				}
-			}
-
-			{
-				int xx = 1;
-				if (-1 == setsockopt(sockfd, SOL_SOCKET,
-				                     SO_REUSEADDR, &xx,
-				                     sizeof xx)) {
-					if (aip->ai_next != 0)
-						goto close_sock;
-					perror("setsockopt");
-					return EXIT_FAILURE;
-				}
-			}
-
-			switch (family) {
-			case AF_INET: {
-				int xx = 1;
-				if (-1 == setsockopt(sockfd, IPPROTO_IP,
-				                     IP_FREEBIND, &xx,
-				                     sizeof xx)) {
-					if (aip->ai_next != 0)
-						goto close_sock;
-					perror("setsockopt");
-					return EXIT_FAILURE;
-				}
-			} break;
-
-			case AF_INET6:
-				break;
-
-			default:
-				goto close_sock;
-			}
-
-			if (-1 == bind(sockfd, aip->ai_addr,
-			               aip->ai_addrlen)) {
-				if (aip->ai_next)
-					goto close_sock;
-				perror("bind");
-				return EXIT_FAILURE;
-			}
-			goto got_socket;
-
-		close_sock:
-			close(sockfd);
-			continue;
-		}
-
-		fprintf(stderr, "%s: no bindable address found\n",
-		        argv[0U]);
-		return EXIT_FAILURE;
 
 		{
-		got_socket:
-			;
 			struct sockaddr_storage addr = {0};
 			socklen_t addr_size = sizeof addr;
 			if (-1 == getsockname(sockfd, (void *)&addr,
@@ -399,10 +320,10 @@ int main(int argc, char **argv)
 				port =
 				    ntohs(((struct sockaddr_in *)&addr)
 				              ->sin_port);
-				fprintf(stdout,
+				fprintf(stderr,
 				        "Bound as %s://%s:%" PRIu16
 				        "\n",
-				        scheme_str, aip->ai_canonname,
+				        scheme_str, node,
 				        (uint_least16_t)port);
 				break;
 			}
@@ -411,10 +332,10 @@ int main(int argc, char **argv)
 				port =
 				    ntohs(((struct sockaddr_in6 *)&addr)
 				              ->sin6_port);
-				fprintf(stdout,
+				fprintf(stderr,
 				        "Bound as %s://%s:%" PRIu16
 				        "\n",
-				        scheme_str, aip->ai_canonname,
+				        scheme_str, node,
 				        (uint_least16_t)port);
 				break;
 			}
@@ -425,8 +346,6 @@ int main(int argc, char **argv)
 				break;
 			}
 		}
-
-		freeaddrinfo(addrinfo_head);
 
 		listener->sockfd = sockfd;
 	}
@@ -899,6 +818,107 @@ static void process_sockfd(struct listener *listener)
 				sock_fail(listener, errno);
 		}
 	}
+}
+
+static int bind_to_service(char const *service, char const *node,
+                           int *sockfdp, struct addrinfo const *hints)
+{
+	int err = 0;
+
+	int sockfd = -1;
+
+	struct addrinfo *addrinfo_head;
+	{
+		struct addrinfo *xx;
+		int error = getaddrinfo(
+		    node, service, (struct addrinfo const *)hints, &xx);
+		if (error != 0) {
+			if (EAI_SYSTEM == error) {
+				return errno;
+			} else {
+				return ENOSYS;
+			}
+		}
+		addrinfo_head = xx;
+	}
+
+	struct addrinfo *aip;
+	for (aip = addrinfo_head; aip != 0; aip = aip->ai_next) {
+		sa_family_t family = aip->ai_family;
+		sockfd =
+		    socket(family, aip->ai_socktype | SOCK_CLOEXEC |
+		                       SOCK_NONBLOCK,
+		           aip->ai_protocol);
+		if (sockfd < 0) {
+			err = errno;
+			switch (err) {
+			case EAFNOSUPPORT:
+			case EPROTONOSUPPORT:
+				if (aip->ai_next) {
+					err = 0;
+					continue;
+				}
+
+				break;
+
+			default:
+				break;
+			}
+		}
+
+		{
+			int xx = 1;
+			if (-1 == setsockopt(sockfd, SOL_SOCKET,
+			                     SO_REUSEADDR, &xx,
+			                     sizeof xx)) {
+				err = errno;
+				if (aip->ai_next != 0)
+					err = 0;
+				goto close_sock;
+			}
+		}
+
+		switch (family) {
+		case AF_INET: {
+			int xx = 1;
+			if (-1 == setsockopt(sockfd, IPPROTO_IP,
+			                     IP_FREEBIND, &xx,
+			                     sizeof xx)) {
+				if (aip->ai_next != 0)
+					err = 0;
+				goto close_sock;
+			}
+			break;
+		}
+
+		case AF_INET6:
+			break;
+
+		default:
+			goto close_sock;
+		}
+
+		if (-1 == bind(sockfd, aip->ai_addr, aip->ai_addrlen)) {
+			if (aip->ai_next)
+				err = 0;
+			goto close_sock;
+		}
+		err = 0;
+		break;
+
+	close_sock:
+		close(sockfd);
+		if (err != 0)
+			break;
+		continue;
+	}
+
+	if (0 == err)
+		*sockfdp = sockfd;
+
+	freeaddrinfo(addrinfo_head);
+
+	return err;
 }
 
 static short sock_poll(struct listener *listener, int fd, short flags)

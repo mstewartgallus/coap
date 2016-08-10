@@ -55,10 +55,11 @@ static struct coap_logger my_logger;
 
 static unsigned long random_timeout_ms(struct coap_cfg const *cfg);
 static int slurp_file(FILE *file, char **bufp, size_t *sizep);
+static int connect_to_service(char const *service, char const *node,
+                              int *sockfdp);
 
 int main(int argc, char **argv)
 {
-	int sockfd;
 	int error;
 
 	bool print_help = false;
@@ -202,90 +203,17 @@ int main(int argc, char **argv)
 		stdin_size = yy;
 	}
 
-	struct addrinfo *addrinfo_head;
+	int sockfd;
 	{
-		struct addrinfo *xx;
-		struct addrinfo hints = {0};
-
-		hints.ai_flags = AI_CANONNAME;
-		hints.ai_family = PF_UNSPEC;
-		hints.ai_socktype = SOCK_DGRAM;
-
-		bool has_ip6_addr = false;
-		char buf[INET6_ADDRSTRLEN + 1U] = {0};
-		if (host[0U] == '[') {
-			strncpy(buf, host + 1U, sizeof buf);
-			*strchr(buf, ']') = '\0';
-			hints.ai_flags |= AI_NUMERICHOST;
-			has_ip6_addr = true;
-		}
-
-		error = getaddrinfo(has_ip6_addr ? buf : node, service,
-		                    &hints, &xx);
-		if (error != 0) {
-			if (EAI_SYSTEM == error) {
-				perror("getaddrinfo");
-			} else {
-				fprintf(stderr, "%s: getaddrinfo: %s\n",
-				        argv[0U], gai_strerror(error));
-			}
+		int xx;
+		int err = connect_to_service(service, node, &xx);
+		if (err != 0) {
+			errno = err;
+			perror("connect_to_service");
 			return EXIT_FAILURE;
 		}
-		addrinfo_head = xx;
+		sockfd = xx;
 	}
-
-	struct addrinfo *aip;
-	for (aip = addrinfo_head; aip != 0; aip = aip->ai_next) {
-		sockfd = socket(aip->ai_family,
-		                aip->ai_socktype | SOCK_CLOEXEC,
-		                aip->ai_protocol);
-		if (sockfd < 0) {
-			switch (errno) {
-			case EAFNOSUPPORT:
-			case EPROTONOSUPPORT:
-				if (aip->ai_next != 0)
-					continue;
-
-				perror("socket");
-				return EXIT_FAILURE;
-
-			default:
-				perror("socket");
-				return EXIT_FAILURE;
-			}
-		}
-
-		{
-			int xx = 1;
-			if (-1 == setsockopt(sockfd, SOL_SOCKET,
-			                     SO_REUSEADDR, &xx,
-			                     sizeof xx)) {
-				if (aip->ai_next != 0)
-					goto close_sock;
-				perror("setsockopt");
-				return EXIT_FAILURE;
-			}
-		}
-
-		if (-1 ==
-		    connect(sockfd, aip->ai_addr, aip->ai_addrlen)) {
-			if (aip->ai_next != 0)
-				goto close_sock;
-
-			perror("connect");
-			return EXIT_FAILURE;
-		}
-		goto got_socket;
-
-	close_sock:
-		close(sockfd);
-		continue;
-	}
-	fprintf(stderr, "%s: no connectable address found\n", argv[0U]);
-	return EXIT_FAILURE;
-
-got_socket:
-	freeaddrinfo(addrinfo_head);
 
 	{
 		struct sockaddr_storage addr = {0};
@@ -612,7 +540,6 @@ got_socket:
 		if (!decoder.has_payload)
 			continue;
 
-	process_payload:
 		fprintf(stderr, "%s\n",
 		        strndup(recv_buf + decoder.header_size,
 		                message_size - decoder.header_size));
@@ -701,6 +628,105 @@ static int slurp_file(FILE *file, char **bufp, size_t *sizep)
 	*sizep = bytes_read;
 
 	return 0;
+}
+
+static int connect_to_service(char const *service, char const *node,
+                              int *sockfdp)
+{
+	int err = 0;
+
+	struct addrinfo *addrinfo_head;
+	{
+		struct addrinfo *xx;
+		struct addrinfo hints = {0};
+
+		hints.ai_flags = AI_CANONNAME;
+		hints.ai_family = PF_UNSPEC;
+		hints.ai_socktype = SOCK_DGRAM;
+
+		bool has_ip6_addr = false;
+		char buf[INET6_ADDRSTRLEN + 1U] = {0};
+		if (node[0U] == '[') {
+			strncpy(buf, node + 1U, sizeof buf);
+			*strchr(buf, ']') = '\0';
+			hints.ai_flags |= AI_NUMERICHOST;
+			has_ip6_addr = true;
+		}
+
+		int error = getaddrinfo(has_ip6_addr ? buf : node,
+		                        service, &hints, &xx);
+		if (error != 0) {
+			if (EAI_SYSTEM == error) {
+				return errno;
+			} else {
+				return ENOSYS;
+			}
+		}
+		addrinfo_head = xx;
+	}
+
+	int sockfd = -1;
+
+	struct addrinfo *aip;
+	for (aip = addrinfo_head; aip != 0; aip = aip->ai_next) {
+		sockfd = socket(aip->ai_family,
+		                aip->ai_socktype | SOCK_CLOEXEC,
+		                aip->ai_protocol);
+		if (sockfd < 0) {
+			err = errno;
+			switch (err) {
+			case EAFNOSUPPORT:
+			case EPROTONOSUPPORT:
+				if (aip->ai_next != 0) {
+					err = 0;
+					continue;
+				}
+
+				goto free_addr_info;
+
+			default:
+				goto free_addr_info;
+			}
+		}
+
+		{
+			int xx = 1;
+			if (-1 == setsockopt(sockfd, SOL_SOCKET,
+			                     SO_REUSEADDR, &xx,
+			                     sizeof xx)) {
+				err = errno;
+				if (aip->ai_next != 0)
+					err = 0;
+				goto close_sock;
+			}
+		}
+
+		if (-1 ==
+		    connect(sockfd, aip->ai_addr, aip->ai_addrlen)) {
+			err = errno;
+
+			if (aip->ai_next != 0)
+				err = 0;
+
+			goto close_sock;
+		}
+		break;
+
+	close_sock:
+		close(sockfd);
+		if (err != 0)
+			break;
+		continue;
+	}
+
+free_addr_info:
+	freeaddrinfo(addrinfo_head);
+
+	if (0 == err) {
+		*sockfdp = sockfd;
+	}
+
+	return err;
 }
 
 static void my_log(struct coap_logger *logger, char const *format, ...);

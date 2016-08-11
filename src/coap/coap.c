@@ -160,12 +160,12 @@ coap_error coap_encode_start(struct coap_encoder *encoder,
 
 	encoded_size += sizeof header_bytes;
 	if (encoded_size > buffer_size)
-		goto size_overflow;
+		return COAP_ERROR_BUFFER_OVERFLOW;
 	memcpy(buffer, header_bytes, sizeof header_bytes);
 
 	encoded_size += token_size;
 	if (encoded_size > buffer_size)
-		goto size_overflow;
+		return COAP_ERROR_BUFFER_OVERFLOW;
 	write_bytes(buffer + encoded_size - token_size, token);
 
 	encoder->logger = logger;
@@ -175,9 +175,6 @@ coap_error coap_encode_start(struct coap_encoder *encoder,
 	encoder->last_option_type = 0U;
 
 	return 0;
-
-size_overflow:
-	return COAP_ERROR_BAD_PACKET;
 }
 
 coap_error coap_encode_option_string(struct coap_encoder *encoder,
@@ -191,7 +188,7 @@ coap_error coap_encode_option_string(struct coap_encoder *encoder,
 	size_t buffer_size = encoder->buffer_size;
 
 	if (str_size > 255U)
-		return COAP_ERROR_BAD_PACKET;
+		return COAP_ERROR_BUFFER_OVERFLOW;
 
 	int coap_option_delta = option_type - last_option_type;
 	if (coap_option_delta < 0) {
@@ -205,7 +202,7 @@ coap_error coap_encode_option_string(struct coap_encoder *encoder,
 
 	buffer_index += sizeof option_header;
 	if (buffer_index > buffer_size)
-		goto size_overflow;
+		return COAP_ERROR_BUFFER_OVERFLOW;
 
 	if (str_size <= 12U) {
 		option_header |= str_size;
@@ -223,13 +220,13 @@ coap_error coap_encode_option_string(struct coap_encoder *encoder,
 		unsigned char length_byte = str_size - 13U;
 		buffer_index += 1U;
 		if (buffer_index > buffer_size)
-			goto size_overflow;
+			return COAP_ERROR_BUFFER_OVERFLOW;
 		memcpy(buffer + buffer_index - 1U, &length_byte, 1U);
 	}
 
 	buffer_index += str_size;
 	if (buffer_index > buffer_size)
-		goto size_overflow;
+		return COAP_ERROR_BUFFER_OVERFLOW;
 
 	memcpy(buffer + buffer_index - str_size, str, str_size);
 
@@ -237,9 +234,6 @@ coap_error coap_encode_option_string(struct coap_encoder *encoder,
 	encoder->buffer_index = buffer_index;
 
 	return 0;
-
-size_overflow:
-	return COAP_ERROR_BAD_PACKET;
 }
 
 coap_error coap_encode_option_uint(struct coap_encoder *encoder,
@@ -266,14 +260,14 @@ coap_error coap_encode_option_uint(struct coap_encoder *encoder,
 
 	buffer_index += sizeof option_header;
 	if (buffer_index > buffer_size)
-		goto size_overflow;
+		return COAP_ERROR_BUFFER_OVERFLOW;
 
 	memcpy(buffer + buffer_index - sizeof option_header,
 	       &option_header, sizeof option_header);
 
 	buffer_index += option_length;
 	if (buffer_index > buffer_size)
-		goto size_overflow;
+		return COAP_ERROR_BUFFER_OVERFLOW;
 
 	write_bytes(buffer + buffer_index - option_length, uint);
 
@@ -281,15 +275,11 @@ coap_error coap_encode_option_uint(struct coap_encoder *encoder,
 	encoder->buffer_index = buffer_index;
 
 	return 0;
-
-size_overflow:
-	return COAP_ERROR_BAD_PACKET;
 }
 
 coap_error coap_encode_payload(struct coap_encoder *encoder,
                                char const *payload, size_t payload_size)
 {
-	struct coap_logger *logger = encoder->logger;
 	char *buffer = encoder->buffer;
 	size_t buffer_index = encoder->buffer_index;
 	size_t buffer_size = encoder->buffer_size;
@@ -297,13 +287,13 @@ coap_error coap_encode_payload(struct coap_encoder *encoder,
 	unsigned char options_end = 0xFF;
 	buffer_index += sizeof options_end;
 	if (buffer_index > buffer_size)
-		goto size_overflow;
+		return COAP_ERROR_BUFFER_OVERFLOW;
 	memcpy(buffer + buffer_index - sizeof options_end, &options_end,
 	       sizeof options_end);
 
 	buffer_index += payload_size;
 	if (buffer_index > buffer_size)
-		goto size_overflow;
+		return COAP_ERROR_BUFFER_OVERFLOW;
 
 	memcpy(buffer + buffer_index - payload_size, payload,
 	       payload_size);
@@ -311,15 +301,11 @@ coap_error coap_encode_payload(struct coap_encoder *encoder,
 	encoder->buffer_index = buffer_index;
 
 	return 0;
-
-size_overflow:
-	return COAP_ERROR_BAD_PACKET;
 }
 
-coap_error coap_header_decode_start(struct coap_decoder *decoder,
-                                    struct coap_logger *logger,
-                                    char const *message,
-                                    size_t message_size)
+coap_error coap_decode_start(struct coap_decoder *decoder,
+                             struct coap_logger *logger,
+                             char const *message, size_t message_size)
 {
 	memset(decoder, 0, sizeof *decoder);
 
@@ -332,7 +318,7 @@ coap_error coap_header_decode_start(struct coap_decoder *decoder,
 	unsigned char header_bytes[4U];
 	message_index += sizeof header_bytes;
 	if (message_index > message_size)
-		return COAP_ERROR_BAD_PACKET;
+		return COAP_ERROR_BUFFER_OVERFLOW;
 	memcpy(header_bytes, message, sizeof header_bytes);
 
 	unsigned char first_byte = header_bytes[0U];
@@ -374,201 +360,200 @@ coap_error coap_header_decode_start(struct coap_decoder *decoder,
 	return 0;
 }
 
-coap_error coap_header_decode_option(struct coap_decoder *decoder)
+coap_error coap_decode_option(struct coap_decoder *decoder)
 {
 	struct coap_logger *logger = decoder->logger;
 	char const *message = decoder->message;
 	size_t message_index = decoder->message_index;
 	size_t message_size = decoder->message_size;
 
-	for (;;) {
-		unsigned char option_header;
-		message_index += 1U;
-		if (message_index > message_size) {
-			/* No payload */
-			message_index -= 1U;
-			decoder->done = true;
-			decoder->message_index = message_index;
-			decoder->header_size = message_index;
-			decoder->has_payload = false;
-			return 0;
-		}
-		memcpy(&option_header, message + message_index - 1U,
-		       1U);
-		if (0xFFU == option_header) {
-			decoder->done = true;
-			decoder->message_index = message_index;
-			decoder->header_size = message_index;
-			decoder->has_payload = true;
-			return 0;
-		}
-
-		unsigned char option_delta = option_header >> 4U;
-		size_t option_length = option_header & 0xFU;
-		switch (option_delta) {
-		case 13U:
-		case 14U:
-		case 15U:
-			LOG(logger, "special delta options are not "
-			            "implemented");
-			return COAP_ERROR_BAD_PACKET;
-		}
-		switch (option_length) {
-		case 13U: {
-			unsigned char length_byte;
-			message_index += sizeof length_byte;
-			if (message_index > message_size)
-				goto packet_too_small;
-			memcpy(&length_byte, message + message_index -
-			                         sizeof length_byte,
-			       sizeof length_byte);
-			option_length = length_byte + 13U;
-			break;
-		}
-
-		case 14U:
-		case 15U:
-			LOG(logger, "special length options are not "
-			            "implemented");
-			return COAP_ERROR_BAD_PACKET;
-		}
-		decoder->option_type += option_delta;
-
-		message_index += option_length;
-		if (message_index > message_size)
-			goto malformed_packet;
-
-		char const *option_start =
-		    message + message_index - option_length;
-
-		bool critical_option =
-		    (decoder->option_type & (1U << 7U)) != 0U;
-
-		bool repeatable;
-		switch (decoder->option_type) {
-		case COAP_OPTION_TYPE_IF_MATCH:
-		case COAP_OPTION_TYPE_ETAG:
-		case COAP_OPTION_TYPE_LOCATION_PATH:
-		case COAP_OPTION_TYPE_URI_PATH:
-		case COAP_OPTION_TYPE_URI_QUERY:
-		case COAP_OPTION_TYPE_LOCATION_QUERY:
-			repeatable = true;
-			break;
-
-		case COAP_OPTION_TYPE_URI_HOST:
-		case COAP_OPTION_TYPE_URI_PORT:
-		case COAP_OPTION_TYPE_IF_NONE_MATCH:
-		case COAP_OPTION_TYPE_CONTENT_FORMAT:
-		case COAP_OPTION_TYPE_MAX_AGE:
-		case COAP_OPTION_TYPE_ACCEPT:
-		case COAP_OPTION_TYPE_PROXY_URI:
-		case COAP_OPTION_TYPE_PROXY_SCHEME:
-		case COAP_OPTION_TYPE_SIZE1:
-			repeatable = false;
-			break;
-		}
-		if (repeatable && 0U == option_delta)
-			goto bad_option_error;
-
-		switch (decoder->option_type) {
-		case COAP_OPTION_TYPE_URI_HOST:
-			if (option_length <= 0U)
-				goto bad_option_error;
-			if (option_length > 255U) {
-				LOG(logger, "abnormally long "
-				            "Uri-Host option of "
-				            "size %lu encountered",
-				    option_length);
-				goto bad_option_error;
-			}
-
-			decoder->str.str = option_start;
-			decoder->str.size = option_length;
-			break;
-
-		case COAP_OPTION_TYPE_URI_PORT: {
-			if (option_length > 2U) {
-				LOG(logger, "abnormally long Uri-Port "
-				            "option of size %lu "
-				            "encountered",
-				    option_length);
-				goto bad_option_error;
-			}
-
-			decoder->uint =
-			    decode_bytes(option_start, option_length);
-			break;
-		}
-
-		case COAP_OPTION_TYPE_URI_PATH:
-			if (option_length > 255U)
-				goto bad_option_error;
-			decoder->str.str = option_start;
-			decoder->str.size = option_length;
-			break;
-
-		case COAP_OPTION_TYPE_URI_QUERY:
-			if (option_length > 255U) {
-				LOG(logger, "abnormally long "
-				            "Uri-Query option of "
-				            "size %lu encountered",
-				    option_length);
-				goto bad_option_error;
-			}
-
-			decoder->str.str = option_start;
-			decoder->str.size = option_length;
-			break;
-
-		case COAP_OPTION_TYPE_CONTENT_FORMAT: {
-			if (option_length > 2U) {
-				LOG(logger, "abnormally long "
-				            "Content-Format option of "
-				            "size %lu encountered",
-				    option_length);
-				goto bad_option_error;
-			}
-
-			decoder->uint =
-			    decode_bytes(option_start, option_length);
-			break;
-		}
-
-		case COAP_OPTION_TYPE_ACCEPT: {
-			if (option_length > 2U) {
-				LOG(logger, "abnormally long Accept "
-				            "option of size %lu "
-				            "encountered",
-				    option_length);
-				goto bad_option_error;
-			}
-
-			decoder->uint =
-			    decode_bytes(option_start, option_length);
-			break;
-		}
-
-		default:
-			LOG(logger, "unknown option %lu encountered",
-			    decoder->option_type);
-			goto bad_option_error;
-		}
-
+restart:
+	;
+	unsigned char option_header;
+	message_index += 1U;
+	if (message_index > message_size) {
+		/* No payload */
+		message_index -= 1U;
+		decoder->done = true;
 		decoder->message_index = message_index;
-
+		decoder->header_size = message_index;
+		decoder->has_payload = false;
 		return 0;
-
-	bad_option_error:
-		/* Ignore elective options we don't understand */
-		if (!critical_option) {
-			continue;
-		}
-
-		return COAP_ERROR_BAD_OPTION;
+	}
+	memcpy(&option_header, message + message_index - 1U, 1U);
+	if (0xFFU == option_header) {
+		decoder->done = true;
+		decoder->message_index = message_index;
+		decoder->header_size = message_index;
+		decoder->has_payload = true;
+		return 0;
 	}
 
-malformed_packet:
+	unsigned char option_delta = option_header >> 4U;
+	size_t option_length = option_header & 0xFU;
+	switch (option_delta) {
+	case 13U:
+	case 14U:
+	case 15U:
+		LOG(logger, "special delta options are not "
+		            "implemented");
+		return COAP_ERROR_BAD_PACKET;
+	}
+	switch (option_length) {
+	case 13U: {
+		unsigned char length_byte;
+		message_index += sizeof length_byte;
+		if (message_index > message_size)
+			goto packet_too_small;
+		memcpy(&length_byte,
+		       message + message_index - sizeof length_byte,
+		       sizeof length_byte);
+		option_length = length_byte + 13U;
+		break;
+	}
+
+	case 14U:
+	case 15U:
+		LOG(logger, "special length options are not "
+		            "implemented");
+		return COAP_ERROR_BAD_PACKET;
+	}
+	decoder->option_type += option_delta;
+
+	message_index += option_length;
+	if (message_index > message_size)
+		goto malformed_packet;
+
+	char const *option_start =
+	    message + message_index - option_length;
+
+	bool critical_option =
+	    (decoder->option_type & (1U << 7U)) != 0U;
+
+	bool repeatable;
+	switch (decoder->option_type) {
+	case COAP_OPTION_TYPE_IF_MATCH:
+	case COAP_OPTION_TYPE_ETAG:
+	case COAP_OPTION_TYPE_LOCATION_PATH:
+	case COAP_OPTION_TYPE_URI_PATH:
+	case COAP_OPTION_TYPE_URI_QUERY:
+	case COAP_OPTION_TYPE_LOCATION_QUERY:
+		repeatable = true;
+		break;
+
+	case COAP_OPTION_TYPE_URI_HOST:
+	case COAP_OPTION_TYPE_URI_PORT:
+	case COAP_OPTION_TYPE_IF_NONE_MATCH:
+	case COAP_OPTION_TYPE_CONTENT_FORMAT:
+	case COAP_OPTION_TYPE_MAX_AGE:
+	case COAP_OPTION_TYPE_ACCEPT:
+	case COAP_OPTION_TYPE_PROXY_URI:
+	case COAP_OPTION_TYPE_PROXY_SCHEME:
+	case COAP_OPTION_TYPE_SIZE1:
+		repeatable = false;
+		break;
+	}
+	if (repeatable && 0U == option_delta)
+		goto bad_option_error;
+
+	switch (decoder->option_type) {
+	case COAP_OPTION_TYPE_URI_HOST:
+		if (option_length <= 0U)
+			goto bad_option_error;
+		if (option_length > 255U) {
+			LOG(logger, "abnormally long "
+			            "Uri-Host option of "
+			            "size %lu encountered",
+			    option_length);
+			goto bad_option_error;
+		}
+
+		decoder->str.str = option_start;
+		decoder->str.size = option_length;
+		break;
+
+	case COAP_OPTION_TYPE_URI_PORT: {
+		if (option_length > 2U) {
+			LOG(logger, "abnormally long Uri-Port "
+			            "option of size %lu "
+			            "encountered",
+			    option_length);
+			goto bad_option_error;
+		}
+
+		decoder->uint =
+		    decode_bytes(option_start, option_length);
+		break;
+	}
+
+	case COAP_OPTION_TYPE_URI_PATH:
+		if (option_length > 255U)
+			goto bad_option_error;
+		decoder->str.str = option_start;
+		decoder->str.size = option_length;
+		break;
+
+	case COAP_OPTION_TYPE_URI_QUERY:
+		if (option_length > 255U) {
+			LOG(logger, "abnormally long "
+			            "Uri-Query option of "
+			            "size %lu encountered",
+			    option_length);
+			goto bad_option_error;
+		}
+
+		decoder->str.str = option_start;
+		decoder->str.size = option_length;
+		break;
+
+	case COAP_OPTION_TYPE_CONTENT_FORMAT: {
+		if (option_length > 2U) {
+			LOG(logger, "abnormally long "
+			            "Content-Format option of "
+			            "size %lu encountered",
+			    option_length);
+			goto bad_option_error;
+		}
+
+		decoder->uint =
+		    decode_bytes(option_start, option_length);
+		break;
+	}
+
+	case COAP_OPTION_TYPE_ACCEPT: {
+		if (option_length > 2U) {
+			LOG(logger, "abnormally long Accept "
+			            "option of size %lu "
+			            "encountered",
+			    option_length);
+			goto bad_option_error;
+		}
+
+		decoder->uint =
+		    decode_bytes(option_start, option_length);
+		break;
+	}
+
+	default:
+		LOG(logger, "unknown option %lu encountered",
+		    decoder->option_type);
+		goto bad_option_error;
+	}
+
+	decoder->message_index = message_index;
+
+	return 0;
+
+bad_option_error:
+	/* Ignore elective options we don't understand */
+	if (!critical_option) {
+		goto restart;
+	}
+
+	return COAP_ERROR_BAD_OPTION;
+
 packet_too_small:
+malformed_packet:
 	return COAP_ERROR_BAD_PACKET;
 }
 

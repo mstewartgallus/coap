@@ -453,8 +453,8 @@ got_socket:
 	}
 
 	struct coap_decoder decoder = {0};
-	coap_error err = coap_header_decode_start(&decoder, &my_logger,
-	                                          buf, message_size);
+	coap_error err =
+	    coap_decode_start(&decoder, &my_logger, buf, message_size);
 	switch (err) {
 	case 0:
 		break;
@@ -497,7 +497,7 @@ got_socket:
 	        (uint_least64_t)decoder.token);
 
 	for (;;) {
-		coap_header_decode_option(&decoder);
+		coap_decode_option(&decoder);
 		if (decoder.done)
 			break;
 	}

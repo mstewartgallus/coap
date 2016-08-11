@@ -552,7 +552,7 @@ static void process_sockfd(struct listener *listener)
 
 		coap_code response_code;
 		{
-			coap_error err = coap_header_decode_start(
+			coap_error err = coap_decode_start(
 			    &decoder, logger, recv_buffer,
 			    message_size);
 			switch (err) {
@@ -602,7 +602,7 @@ static void process_sockfd(struct listener *listener)
 			for (;;) {
 				char buf[255U + 1U] = {0};
 
-				coap_header_decode_option(&decoder);
+				coap_decode_option(&decoder);
 				if (decoder.done)
 					break;
 

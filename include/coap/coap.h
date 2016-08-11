@@ -96,6 +96,7 @@ enum { COAP_OPTION_TYPE_IF_MATCH = 1U,
 typedef unsigned char coap_option_type;
 
 enum { COAP_ERROR_UNSUPPORTED_VERSION = 1,
+       COAP_ERROR_BUFFER_OVERFLOW,
        COAP_ERROR_BAD_PACKET,
        COAP_ERROR_BAD_OPTION };
 typedef unsigned char coap_error;
@@ -167,11 +168,10 @@ uint_fast8_t coap_cfg_max_retransmit(struct coap_cfg const *cfg);
 void coap_empty_packet(coap_type type, uint_fast16_t message_id,
                        char *buffer);
 
-coap_error coap_header_decode_start(struct coap_decoder *decoder,
-                                    struct coap_logger *logger,
-                                    char const *message,
-                                    size_t message_size);
-coap_error coap_header_decode_option(struct coap_decoder *decoder);
+coap_error coap_decode_start(struct coap_decoder *decoder,
+                             struct coap_logger *logger,
+                             char const *message, size_t message_size);
+coap_error coap_decode_option(struct coap_decoder *decoder);
 
 coap_error coap_encode_start(struct coap_encoder *encoder,
                              struct coap_logger *logger,

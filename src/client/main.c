@@ -445,9 +445,9 @@ int main(int argc, char **argv)
 
 		struct coap_decoder decoder = {0};
 		{
-			coap_error err = coap_header_decode_start(
-			    &decoder, &my_logger, recv_buf,
-			    message_size);
+			coap_error err =
+			    coap_decode_start(&decoder, &my_logger,
+			                      recv_buf, message_size);
 			switch (err) {
 			case 0:
 				break;
@@ -507,7 +507,7 @@ int main(int argc, char **argv)
 		bool content_format_set = false;
 
 		for (;;) {
-			coap_header_decode_option(&decoder);
+			coap_decode_option(&decoder);
 			if (decoder.done)
 				break;
 

@@ -725,46 +725,39 @@ static void process_sockfd(struct listener *listener)
 		}
 
 		{
-			static struct coap_option const options[] = {
-			    {.type = COAP_OPTION_TYPE_CONTENT_FORMAT,
-			     .value = {
-			         .uint =
-			             COAP_CONTENT_FORMAT_APPLICATION_JSON}}};
+			struct coap_encoder encoder = {0};
+			coap_error err = coap_encode_start(
+			    &encoder, logger, 1U, type, response_code,
+			    decoder.message_id, decoder.token,
+			    send_buffer, SEND_BUFFER_SIZE);
+			if (err != 0)
+				goto coap_error;
 
-			coap_error err;
-			size_t header_size;
-			{
-				size_t xx = 0U;
-				err = coap_header_encode(
-				    logger, &xx, 1U, type,
-				    response_code, decoder.message_id,
-				    decoder.token, options,
-				    ARRAY_SIZE(options), true,
-				    send_buffer, SEND_BUFFER_SIZE);
-				header_size = xx;
-			}
-			assert(err != COAP_ERROR_UNSUPPORTED_VERSION);
-			assert(err != COAP_ERROR_BAD_PACKET);
-			assert(err != COAP_ERROR_BAD_OPTION);
-			assert(0 == err);
-
-			encoded_size = header_size;
+			err = coap_encode_option_uint(
+			    &encoder, COAP_OPTION_TYPE_CONTENT_FORMAT,
+			    COAP_CONTENT_FORMAT_APPLICATION_JSON);
+			if (err != 0)
+				goto coap_error;
 
 			if (response_code != COAP_CODE_EMPTY) {
 				/* Dummy payload */
 				static char const payload[] =
 				    "{ 'hello' : 'world' }";
 
-				encoded_size += sizeof payload - 1U;
-
-				assert(encoded_size <=
-				       SEND_BUFFER_SIZE);
-
-				memcpy(send_buffer + encoded_size -
-				           sizeof payload + 1U,
-				       payload, sizeof payload - 1U);
+				coap_encode_payload(&encoder, payload,
+				                    sizeof payload -
+				                        1U);
 			}
+
+		coap_error:
+			assert(err != COAP_ERROR_UNSUPPORTED_VERSION);
+			assert(err != COAP_ERROR_BAD_PACKET);
+			assert(err != COAP_ERROR_BAD_OPTION);
+			assert(0 == err);
+
+			encoded_size = encoder.buffer_index;
 		}
+
 	send:
 		for (;;) {
 			if (sendto(sockfd, send_buffer, encoded_size,

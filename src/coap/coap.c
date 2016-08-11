@@ -80,8 +80,20 @@ uint_fast8_t coap_cfg_max_retransmit(struct coap_cfg const *cfg)
 void coap_empty_packet(coap_type type, uint_fast16_t message_id,
                        char *buffer)
 {
-	coap_header_encode(0, 0, 1U, type, COAP_CODE_EMPTY, message_id,
-	                   0, 0, 0U, false, buffer, 4U);
+	unsigned version = 1U;
+	coap_code code = COAP_CODE_EMPTY;
+
+	uint_least16_t network_message_id = htons(message_id);
+
+	unsigned char first_byte = version | (type << 2U) | (0U << 4U);
+
+	unsigned char header_bytes[4U] = {0};
+	memcpy(header_bytes, &first_byte, 1U);
+
+	memcpy(header_bytes + 1U, &code, 1U);
+	memcpy(header_bytes + 2U, &network_message_id, 2U);
+
+	memcpy(buffer, header_bytes, sizeof header_bytes);
 }
 
 static size_t count_bytes(uint_fast64_t value)
@@ -120,149 +132,6 @@ static uint_fast64_t decode_bytes(char const *buf, size_t size)
 		value |= ((uint_fast64_t)byte) << offset;
 	}
 	return value;
-}
-
-coap_error coap_header_encode(struct coap_logger *logger,
-                              size_t *header_sizep,
-                              unsigned char version, coap_type type,
-                              coap_code code, uint_fast16_t message_id,
-                              uint_fast64_t token,
-                              struct coap_option const *options,
-                              size_t options_size, bool have_payload,
-                              char *buffer, size_t buffer_size)
-{
-	size_t encoded_size = 0U;
-
-	if (version != 1U)
-		return COAP_ERROR_UNSUPPORTED_VERSION;
-
-	uint_least16_t network_message_id = htons(message_id);
-
-	size_t token_size = count_bytes(token);
-
-	unsigned char first_byte = version | (type << 2U) |
-	                           (((unsigned char)token_size) << 4U);
-
-	unsigned char header_bytes[4U] = {0};
-	memcpy(header_bytes, &first_byte, 1U);
-	memcpy(header_bytes + 1U, &code, 1U);
-	memcpy(header_bytes + 2U, &network_message_id, 2U);
-
-	encoded_size += sizeof header_bytes;
-	if (encoded_size > buffer_size)
-		goto size_overflow;
-	memcpy(buffer, header_bytes, sizeof header_bytes);
-
-	encoded_size += token_size;
-	if (encoded_size > buffer_size)
-		goto size_overflow;
-	write_bytes(buffer + encoded_size - token_size, token);
-
-	unsigned char last_value = 0U;
-	for (size_t ii = 0U; ii < options_size; ++ii) {
-		int coap_option_delta = options[ii].type - last_value;
-		if (coap_option_delta < 0) {
-			LOG(logger, "options out of order %lu",
-			    options[ii].type);
-			return COAP_ERROR_BAD_OPTION;
-		}
-
-		last_value = options[ii].type;
-
-		coap_option_value option_value_type;
-		uint16_t option_length;
-		char const *option_string;
-		uint_fast64_t option_uint;
-
-		switch (last_value) {
-		case COAP_OPTION_TYPE_URI_HOST:
-		case COAP_OPTION_TYPE_URI_PATH:
-		case COAP_OPTION_TYPE_URI_QUERY: {
-			option_string = options[ii].value.string.buf;
-			size_t str_length =
-			    options[ii].value.string.size;
-			if (str_length > 255U)
-				return COAP_ERROR_BAD_PACKET;
-			option_length = str_length;
-			option_value_type = COAP_OPTION_VALUE_STRING;
-			break;
-		}
-
-		case COAP_OPTION_TYPE_ACCEPT:
-		case COAP_OPTION_TYPE_URI_PORT:
-		case COAP_OPTION_TYPE_CONTENT_FORMAT: {
-			option_uint = options[ii].value.uint;
-			option_length = count_bytes(option_uint);
-			option_value_type = COAP_OPTION_VALUE_UINT;
-			break;
-		}
-
-		default:
-			LOG(logger, "unknown option %lu encountered",
-			    last_value);
-			return COAP_ERROR_BAD_OPTION;
-		}
-
-		unsigned char option_header = coap_option_delta << 4U;
-
-		encoded_size += sizeof option_header;
-		if (encoded_size > buffer_size)
-			goto size_overflow;
-
-		if (option_length <= 12U) {
-			option_header |= option_length;
-		} else if (option_length <= 268U) {
-			option_header |= 13U;
-		} else {
-			/* Currently unimplemented */
-			return COAP_ERROR_BAD_PACKET;
-		}
-
-		memcpy(buffer + encoded_size - sizeof option_header,
-		       &option_header, sizeof option_header);
-
-		if (12U < option_length && option_length <= 268U) {
-			unsigned char length_byte = option_length - 13U;
-			encoded_size += 1U;
-			if (encoded_size > buffer_size)
-				goto size_overflow;
-			memcpy(buffer + encoded_size - 1U, &length_byte,
-			       1U);
-		}
-
-		encoded_size += option_length;
-		if (encoded_size > buffer_size)
-			goto size_overflow;
-
-		switch (option_value_type) {
-		case COAP_OPTION_VALUE_UINT:
-			write_bytes(buffer + encoded_size -
-			                option_length,
-			            option_uint);
-			break;
-
-		case COAP_OPTION_VALUE_STRING:
-			memcpy(buffer + encoded_size - option_length,
-			       option_string, option_length);
-			break;
-		}
-	}
-
-	if (have_payload) {
-		unsigned char options_end = 0xFF;
-		encoded_size += sizeof options_end;
-		if (encoded_size > buffer_size)
-			goto size_overflow;
-		memcpy(buffer + encoded_size - sizeof options_end,
-		       &options_end, sizeof options_end);
-	}
-
-	if (header_sizep != 0)
-		*header_sizep = encoded_size;
-	return 0;
-
-size_overflow:
-	return COAP_ERROR_BAD_PACKET;
 }
 
 coap_error coap_encode_start(struct coap_encoder *encoder,
@@ -418,7 +287,7 @@ size_overflow:
 }
 
 coap_error coap_encode_payload(struct coap_encoder *encoder,
-                               char *payload, size_t payload_size)
+                               char const *payload, size_t payload_size)
 {
 	struct coap_logger *logger = encoder->logger;
 	char *buffer = encoder->buffer;

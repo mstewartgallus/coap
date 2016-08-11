@@ -167,15 +167,6 @@ uint_fast8_t coap_cfg_max_retransmit(struct coap_cfg const *cfg);
 void coap_empty_packet(coap_type type, uint_fast16_t message_id,
                        char *buffer);
 
-coap_error coap_header_encode(struct coap_logger *logger,
-                              size_t *header_sizep,
-                              unsigned char version, coap_type type,
-                              coap_code code, uint_fast16_t message_id,
-                              uint_fast64_t token,
-                              struct coap_option const *options,
-                              size_t options_size, _Bool has_payload,
-                              char *buffer, size_t buffer_size);
-
 coap_error coap_header_decode_start(struct coap_decoder *decoder,
                                     struct coap_logger *logger,
                                     char const *message,
@@ -195,7 +186,8 @@ coap_error coap_encode_option_uint(struct coap_encoder *encoder,
                                    coap_option_type option_type,
                                    uint64_t uint);
 coap_error coap_encode_payload(struct coap_encoder *encoder,
-                               char *payload, size_t payload_size);
+                               char const *payload,
+                               size_t payload_size);
 
 char const *coap_type_string(coap_type type);
 char const *coap_code_string(coap_code code);

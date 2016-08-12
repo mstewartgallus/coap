@@ -87,6 +87,15 @@ static int bind_to_service(char const *service, char const *node,
                            int *sockfdp, struct addrinfo const *hints,
                            int sockflags);
 
+static int recv_request(struct listener *listener, int sockfd,
+                        char *buf, size_t buf_size,
+                        struct sockaddr *from_addr, size_t addrlen,
+                        size_t *message_sizep);
+
+static int send_back(struct listener *listener, int sockfd,
+                     char const *buf, size_t buf_size,
+                     struct sockaddr *dest_addr, socklen_t addrlen);
+
 static short sock_poll(struct listener *listener, int fd, short flags);
 static void sock_fail(struct listener *listener, int err);
 
@@ -481,34 +490,16 @@ static void process_sockfd(struct listener *listener)
 	struct sockaddr_storage *from_addr = &listener->from_addr;
 
 	for (;;) {
-		short revents = sock_poll(listener, sockfd, POLLIN);
-		if (0 == (revents & POLLIN))
-			continue;
-
-		size_t message_size;
-		ssize_t maybe_message_size;
-		{
-			socklen_t xx = sizeof *from_addr;
-			maybe_message_size =
-			    recvfrom(sockfd, recv_buffer,
-			             RECV_BUFFER_SIZE, MSG_DONTWAIT,
-			             (struct sockaddr *)from_addr, &xx);
+		size_t message_size = 0U;
+		error =
+		    recv_request(listener, sockfd, recv_buffer,
+		                 RECV_BUFFER_SIZE, (void *)from_addr,
+		                 sizeof *from_addr, &message_size);
+		if (error != 0) {
+			errno = error;
+			perror("recv_request");
+			sock_fail(listener, error);
 		}
-		if (maybe_message_size < 0) {
-			error = errno;
-			if (EINTR == error) {
-				error = 0;
-				continue;
-			}
-			if (EAGAIN == error) {
-				error = 0;
-				continue;
-			}
-			sock_fail(listener, errno);
-		}
-		message_size = maybe_message_size;
-		if (0U == message_size)
-			continue;
 
 		switch (from_addr->ss_family) {
 		case AF_INET: {
@@ -736,37 +727,94 @@ static void process_sockfd(struct listener *listener)
 		encoded_size = encoder.buffer_index;
 
 	send:
-		for (;;) {
-			ssize_t sent_bytes = sendto(
-			    sockfd, send_buffer, encoded_size,
-			    MSG_DONTWAIT | MSG_NOSIGNAL,
-			    (void *)from_addr, sizeof *from_addr);
-			if (sent_bytes != -1) {
-				break;
-			}
-			error = errno;
-
-			if (ENOMEM == error) {
-				error = 0;
-			}
-
-			if (EAGAIN == error || EWOULDBLOCK == error) {
-				error = 0;
-			}
-
-			if (error != 0) {
-				errno = error;
-				perror("sendto");
-				sock_fail(listener, error);
-			}
-
-			short rflags =
-			    sock_poll(listener, sockfd, POLLOUT);
-
-			if ((rflags & POLLHUP) != 0)
-				sock_fail(listener, errno);
+		error = send_back(listener, sockfd, send_buffer,
+		                  encoded_size, (void *)from_addr,
+		                  sizeof *from_addr);
+		if (error != 0) {
+			errno = error;
+			perror("send_buffer");
+			sock_fail(listener, error);
 		}
 	}
+}
+
+static int recv_request(struct listener *listener, int sockfd,
+                        char *buf, size_t buf_size,
+                        struct sockaddr *from_addr, size_t addrlen,
+                        size_t *message_sizep)
+{
+	int error = 0;
+
+	for (;;) {
+		short revents = sock_poll(listener, sockfd, POLLIN);
+		if (0 == (revents & POLLIN))
+			continue;
+
+		size_t message_size;
+		ssize_t maybe_message_size;
+		{
+			socklen_t xx = addrlen;
+			maybe_message_size = recvfrom(
+			    sockfd, buf, buf_size, MSG_DONTWAIT,
+			    (struct sockaddr *)from_addr, &xx);
+		}
+		if (maybe_message_size < 0) {
+			error = errno;
+			if (EINTR == error) {
+				error = 0;
+				continue;
+			}
+			if (EAGAIN == error) {
+				error = 0;
+				continue;
+			}
+			return errno;
+		}
+		message_size = maybe_message_size;
+		if (0U == message_size)
+			continue;
+
+		*message_sizep = message_size;
+		break;
+	}
+
+	return 0;
+}
+
+static int send_back(struct listener *listener, int sockfd,
+                     char const *buf, size_t buf_size,
+                     struct sockaddr *dest_addr, socklen_t addrlen)
+{
+	int error = 0;
+
+	for (;;) {
+		ssize_t sent_bytes = sendto(sockfd, buf, buf_size,
+		                            MSG_DONTWAIT | MSG_NOSIGNAL,
+		                            dest_addr, addrlen);
+		if (sent_bytes != -1) {
+			break;
+		}
+		error = errno;
+
+		if (ENOMEM == error) {
+			error = 0;
+		}
+
+		if (EAGAIN == error || EWOULDBLOCK == error) {
+			error = 0;
+		}
+
+		if (error != 0) {
+			return error;
+		}
+
+		short rflags = sock_poll(listener, sockfd, POLLOUT);
+
+		if ((rflags & POLLHUP) != 0)
+			return errno;
+	}
+
+	return 0;
 }
 
 static int bind_to_service(char const *service, char const *node,

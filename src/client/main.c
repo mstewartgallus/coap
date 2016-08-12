@@ -443,6 +443,8 @@ int main(int argc, char **argv)
 			message_size = xx;
 		}
 
+		coap_log_msg(stderr, recv_buf, message_size);
+
 		struct coap_decoder decoder = {0};
 		{
 			coap_error err =
@@ -466,20 +468,6 @@ int main(int argc, char **argv)
 				return EXIT_FAILURE;
 			}
 		}
-
-		char const *type_str = coap_type_string(decoder.type);
-
-		char const *details = coap_code_string(decoder.code);
-		if (0 == details)
-			details = "unknown request code detail";
-
-		fprintf(stderr, "Received COAP request:\n");
-		fprintf(stderr, "\t%s\n", type_str);
-		fprintf(stderr, "\t%s\n", details);
-		fprintf(stderr, "\tMessage Id: 0x%" PRIx16 "\n",
-		        (uint_least16_t)decoder.message_id);
-		fprintf(stderr, "\tToken: 0x%" PRIx64 "\n",
-		        (uint_least64_t)decoder.token);
 
 		if (request.message_id != decoder.message_id) {
 			fprintf(stderr, "Bad message id ignoring!\n");
@@ -515,22 +503,6 @@ int main(int argc, char **argv)
 			case COAP_OPTION_TYPE_CONTENT_FORMAT: {
 				content_format = decoder.uint;
 				content_format_set = true;
-
-				char const *content_str =
-				    coap_content_format_string(
-				        content_format);
-				if (0 == content_str) {
-					fprintf(
-					    stderr,
-					    "\tContent-Format: %" PRIu64
-					    "\n",
-					    content_format);
-				} else {
-					fprintf(
-					    stderr,
-					    "\tContent-Format: %s\n",
-					    content_str);
-				}
 				break;
 			}
 			}

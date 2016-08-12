@@ -20,10 +20,10 @@
 #include <arpa/inet.h>
 #include <ctype.h>
 #include <errno.h>
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
-
 #include <stdio.h>
 
 struct coap_cfg {
@@ -678,5 +678,94 @@ coap_content_format_string(coap_content_format content_format)
 		return "application/json";
 	default:
 		return 0;
+	}
+}
+
+void coap_log_msg(FILE *file, char const *buf, size_t buf_size)
+{
+	struct coap_decoder decoder = {0};
+
+	if (coap_decode_start(&decoder, 0, buf, buf_size) != 0)
+		return;
+
+	char const *type_str = coap_type_string(decoder.type);
+	char const *request_str = coap_code_string(decoder.code);
+
+	fprintf(file, "Received COAP request:\n");
+	fprintf(file, "\t%s\n", type_str);
+	fprintf(file, "\t%s\n", request_str);
+	fprintf(file, "\tMessage Id: 0x%" PRIx16 "\n",
+	        (uint_least16_t)decoder.message_id);
+	fprintf(file, "\tToken: 0x%" PRIx64 "\n",
+	        (uint_least64_t)decoder.token);
+
+	for (;;) {
+		char strbuf[255U + 1U] = {0};
+
+		coap_decode_option(&decoder);
+		if (decoder.done)
+			break;
+
+		switch (decoder.option_type) {
+		case COAP_OPTION_TYPE_CONTENT_FORMAT: {
+			char const *content_str =
+			    coap_content_format_string(decoder.uint);
+			if (0 == content_str) {
+				fprintf(file,
+				        "\tContent-Format: %" PRIu64
+				        "\n",
+				        decoder.uint);
+			} else {
+				fprintf(file, "\tContent-Format: %s\n",
+				        content_str);
+			}
+
+			fprintf(file, "\tContent-Format: "
+			              "0x%" PRIx64 "\n",
+			        (uint_least64_t)decoder.uint);
+			break;
+		}
+
+		case COAP_OPTION_TYPE_URI_PATH:
+			memcpy(strbuf, decoder.str.str,
+			       decoder.str.size);
+			fprintf(file, "\tUri-Path: %s\n", strbuf);
+			break;
+
+		case COAP_OPTION_TYPE_URI_HOST:
+			memcpy(strbuf, decoder.str.str,
+			       decoder.str.size);
+			fprintf(file, "\tUri-Host: %s\n", strbuf);
+			break;
+
+		case COAP_OPTION_TYPE_URI_PORT:
+			fprintf(file, "\tUri-Port: "
+			              "%" PRIu64 "\n",
+			        (uint_least64_t)decoder.uint);
+			break;
+
+		case COAP_OPTION_TYPE_URI_QUERY:
+			memcpy(strbuf, decoder.str.str,
+			       decoder.str.size);
+			fprintf(file, "\tUri-Query: %s\n", strbuf);
+			break;
+
+		case COAP_OPTION_TYPE_ACCEPT: {
+			coap_content_format acceptable_format =
+			    decoder.uint;
+
+			char const *str = coap_content_format_string(
+			    acceptable_format);
+			if (0 == str) {
+				fprintf(
+				    file, "\tAccept: "
+				          "%" PRIu64 "\n",
+				    (uint_least64_t)acceptable_format);
+			} else {
+				fprintf(file, "\tAccept: %s\n", str);
+			}
+			break;
+		}
+		}
 	}
 }

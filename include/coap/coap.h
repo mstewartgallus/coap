@@ -17,6 +17,7 @@
 #define COAP_H
 
 #include <stdint.h>
+#include <stdio.h>
 #include <sys/types.h>
 
 enum { COAP_TYPE_CONFIRMABLE,
@@ -192,4 +193,6 @@ coap_error coap_encode_payload(struct coap_encoder *encoder,
 char const *coap_type_string(coap_type type);
 char const *coap_code_string(coap_code code);
 char const *coap_content_format_string(coap_content_format code);
+
+void coap_log_msg(FILE *file, char const *buf, size_t buf_size);
 #endif

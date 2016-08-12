@@ -83,6 +83,8 @@ struct listener {
 	int socket_error;
 };
 
+static void log_coap_msg(FILE *file, char const *buf, size_t buf_size);
+
 static int bind_to_service(char const *service, char const *node,
                            int *sockfdp, struct addrinfo const *hints,
                            int sockflags);
@@ -537,6 +539,8 @@ static void process_sockfd(struct listener *listener)
 			break;
 		}
 
+		log_coap_msg(stderr, recv_buffer, message_size);
+
 		struct coap_decoder decoder = {0};
 
 		coap_code response_code;
@@ -570,77 +574,16 @@ static void process_sockfd(struct listener *listener)
 			goto setup_response;
 		}
 
-		char const *type_str = coap_type_string(decoder.type);
-		char const *request_str =
-		    coap_code_string(decoder.code);
-
-		fprintf(stderr, "Received COAP request:\n");
-		fprintf(stderr, "\t%s\n", type_str);
-		fprintf(stderr, "\t%s\n", request_str);
-		fprintf(stderr, "\tMessage Id: 0x%" PRIx16 "\n",
-		        (uint_least16_t)decoder.message_id);
-		fprintf(stderr, "\tToken: 0x%" PRIx64 "\n",
-		        (uint_least64_t)decoder.token);
-
 		for (;;) {
-			char buf[255U + 1U] = {0};
-
 			coap_decode_option(&decoder);
 			if (decoder.done)
 				break;
 
 			switch (decoder.option_type) {
-			case COAP_OPTION_TYPE_CONTENT_FORMAT:
-				fprintf(stderr, "\tContent-Format: "
-				                "0x%" PRIx64 "\n",
-				        (uint_least64_t)decoder.uint);
-				break;
-
-			case COAP_OPTION_TYPE_URI_PATH:
-				memcpy(buf, decoder.str.str,
-				       decoder.str.size);
-				fprintf(stderr, "\tUri-Path: %s\n",
-				        buf);
-				break;
-
-			case COAP_OPTION_TYPE_URI_HOST:
-				memcpy(buf, decoder.str.str,
-				       decoder.str.size);
-				fprintf(stderr, "\tUri-Host: %s\n",
-				        buf);
-				break;
-
-			case COAP_OPTION_TYPE_URI_PORT:
-				fprintf(stderr, "\tUri-Port: "
-				                "%" PRIu64 "\n",
-				        (uint_least64_t)decoder.uint);
-				break;
-
-			case COAP_OPTION_TYPE_URI_QUERY:
-				memcpy(buf, decoder.str.str,
-				       decoder.str.size);
-				fprintf(stderr, "\tUri-Query: %s\n",
-				        buf);
-				break;
-
-			case COAP_OPTION_TYPE_ACCEPT: {
+			case COAP_OPTION_TYPE_ACCEPT:
 				acceptable_format = decoder.uint;
 				acceptable_format_set = true;
-
-				char const *str =
-				    coap_content_format_string(
-				        acceptable_format);
-				if (0 == str) {
-					fprintf(stderr, "\tAccept: "
-					                "%" PRIu64 "\n",
-					        (uint_least64_t)
-					            acceptable_format);
-				} else {
-					fprintf(stderr,
-					        "\tAccept: %s\n", str);
-				}
 				break;
-			}
 			}
 		}
 
@@ -672,8 +615,9 @@ static void process_sockfd(struct listener *listener)
 
 		response_code = COAP_CODE_RESPONSE_SUCCESS_CONTENT;
 
-		if (acceptable_format !=
-		    COAP_CONTENT_FORMAT_APPLICATION_JSON) {
+		if (acceptable_format_set &&
+		    acceptable_format !=
+		        COAP_CONTENT_FORMAT_APPLICATION_JSON) {
 			response_code =
 			    COAP_CODE_RESPONSE_CLIENT_ERROR_UNSUPPORTED_CONTENT_FORMAT;
 			goto setup_response;
@@ -734,6 +678,82 @@ static void process_sockfd(struct listener *listener)
 			errno = error;
 			perror("send_buffer");
 			sock_fail(listener, error);
+		}
+	}
+}
+
+static void log_coap_msg(FILE *file, char const *buf, size_t buf_size)
+{
+	struct coap_decoder decoder = {0};
+
+	if (coap_decode_start(&decoder, 0, buf, buf_size) != 0)
+		return;
+
+	char const *type_str = coap_type_string(decoder.type);
+	char const *request_str = coap_code_string(decoder.code);
+
+	fprintf(file, "Received COAP request:\n");
+	fprintf(file, "\t%s\n", type_str);
+	fprintf(file, "\t%s\n", request_str);
+	fprintf(file, "\tMessage Id: 0x%" PRIx16 "\n",
+	        (uint_least16_t)decoder.message_id);
+	fprintf(file, "\tToken: 0x%" PRIx64 "\n",
+	        (uint_least64_t)decoder.token);
+
+	for (;;) {
+		char strbuf[255U + 1U] = {0};
+
+		coap_decode_option(&decoder);
+		if (decoder.done)
+			break;
+
+		switch (decoder.option_type) {
+		case COAP_OPTION_TYPE_CONTENT_FORMAT:
+			fprintf(file, "\tContent-Format: "
+			              "0x%" PRIx64 "\n",
+			        (uint_least64_t)decoder.uint);
+			break;
+
+		case COAP_OPTION_TYPE_URI_PATH:
+			memcpy(strbuf, decoder.str.str,
+			       decoder.str.size);
+			fprintf(file, "\tUri-Path: %s\n", strbuf);
+			break;
+
+		case COAP_OPTION_TYPE_URI_HOST:
+			memcpy(strbuf, decoder.str.str,
+			       decoder.str.size);
+			fprintf(file, "\tUri-Host: %s\n", strbuf);
+			break;
+
+		case COAP_OPTION_TYPE_URI_PORT:
+			fprintf(file, "\tUri-Port: "
+			              "%" PRIu64 "\n",
+			        (uint_least64_t)decoder.uint);
+			break;
+
+		case COAP_OPTION_TYPE_URI_QUERY:
+			memcpy(strbuf, decoder.str.str,
+			       decoder.str.size);
+			fprintf(file, "\tUri-Query: %s\n", strbuf);
+			break;
+
+		case COAP_OPTION_TYPE_ACCEPT: {
+			coap_content_format acceptable_format =
+			    decoder.uint;
+
+			char const *str = coap_content_format_string(
+			    acceptable_format);
+			if (0 == str) {
+				fprintf(
+				    file, "\tAccept: "
+				          "%" PRIu64 "\n",
+				    (uint_least64_t)acceptable_format);
+			} else {
+				fprintf(file, "\tAccept: %s\n", str);
+			}
+			break;
+		}
 		}
 	}
 }

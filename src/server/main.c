@@ -389,7 +389,6 @@ int main(int argc, char **argv)
 		                   MAP_PRIVATE | MAP_ANONYMOUS |
 		                       MAP_GROWSDOWN | MAP_STACK,
 		                   -1, 0);
-		;
 		if (MAP_FAILED == stack) {
 			perror("mmap");
 			return EXIT_FAILURE;
@@ -487,30 +486,29 @@ static void process_sockfd(struct listener *listener)
 			continue;
 
 		size_t message_size;
+		ssize_t maybe_message_size;
 		{
 			socklen_t xx = sizeof *from_addr;
-
-			ssize_t maybe_message_size =
+			maybe_message_size =
 			    recvfrom(sockfd, recv_buffer,
 			             RECV_BUFFER_SIZE, MSG_DONTWAIT,
 			             (struct sockaddr *)from_addr, &xx);
-
-			if (maybe_message_size < 0) {
-				error = errno;
-				if (EINTR == error) {
-					error = 0;
-					continue;
-				}
-				if (EAGAIN == error) {
-					error = 0;
-					continue;
-				}
-				sock_fail(listener, errno);
-			}
-			message_size = maybe_message_size;
-			if (0U == message_size)
-				continue;
 		}
+		if (maybe_message_size < 0) {
+			error = errno;
+			if (EINTR == error) {
+				error = 0;
+				continue;
+			}
+			if (EAGAIN == error) {
+				error = 0;
+				continue;
+			}
+			sock_fail(listener, errno);
+		}
+		message_size = maybe_message_size;
+		if (0U == message_size)
+			continue;
 
 		switch (from_addr->ss_family) {
 		case AF_INET: {
@@ -551,125 +549,107 @@ static void process_sockfd(struct listener *listener)
 		struct coap_decoder decoder = {0};
 
 		coap_code response_code;
-		{
-			coap_error err = coap_decode_start(
-			    &decoder, logger, recv_buffer,
-			    message_size);
-			switch (err) {
-			case 0:
+		coap_error coap_err = 0;
+
+		coap_err = coap_decode_start(&decoder, logger,
+		                             recv_buffer, message_size);
+		switch (coap_err) {
+		case 0:
+			break;
+
+		case COAP_ERROR_BAD_OPTION:
+			response_code =
+			    COAP_CODE_RESPONSE_CLIENT_ERROR_BAD_OPTION;
+			goto setup_response;
+
+		default:
+			response_code =
+			    COAP_CODE_RESPONSE_CLIENT_ERROR_BAD_REQUEST;
+			goto setup_response;
+		}
+
+		switch (decoder.code) {
+		case COAP_CODE_EMPTY:
+		case COAP_CODE_REQUEST_GET:
+			break;
+
+		default:
+			response_code =
+			    COAP_CODE_RESPONSE_CLIENT_ERROR_METHOD_NOT_FOUND;
+			goto setup_response;
+		}
+
+		char const *type_str = coap_type_string(decoder.type);
+		char const *request_str =
+		    coap_code_string(decoder.code);
+
+		fprintf(stderr, "Received COAP request:\n");
+		fprintf(stderr, "\t%s\n", type_str);
+		fprintf(stderr, "\t%s\n", request_str);
+		fprintf(stderr, "\tMessage Id: 0x%" PRIx16 "\n",
+		        (uint_least16_t)decoder.message_id);
+		fprintf(stderr, "\tToken: 0x%" PRIx64 "\n",
+		        (uint_least64_t)decoder.token);
+
+		for (;;) {
+			char buf[255U + 1U] = {0};
+
+			coap_decode_option(&decoder);
+			if (decoder.done)
 				break;
 
-			case COAP_ERROR_UNSUPPORTED_VERSION:
-				response_code =
-				    COAP_CODE_RESPONSE_CLIENT_ERROR_BAD_REQUEST;
-				goto setup_response;
-
-			case COAP_ERROR_BAD_PACKET:
-				response_code =
-				    COAP_CODE_RESPONSE_CLIENT_ERROR_BAD_REQUEST;
-				goto setup_response;
-
-			case COAP_ERROR_BAD_OPTION:
-				response_code =
-				    COAP_CODE_RESPONSE_CLIENT_ERROR_BAD_OPTION;
-				goto setup_response;
-			}
-
-			switch (decoder.code) {
-			case COAP_CODE_EMPTY:
-			case COAP_CODE_REQUEST_GET:
+			switch (decoder.option_type) {
+			case COAP_OPTION_TYPE_CONTENT_FORMAT:
+				fprintf(stderr, "\tContent-Format: "
+				                "0x%" PRIx64 "\n",
+				        (uint_least64_t)decoder.uint);
 				break;
 
-			default:
-				response_code =
-				    COAP_CODE_RESPONSE_CLIENT_ERROR_METHOD_NOT_FOUND;
-				goto setup_response;
-			}
+			case COAP_OPTION_TYPE_URI_PATH:
+				memcpy(buf, decoder.str.str,
+				       decoder.str.size);
+				fprintf(stderr, "\tUri-Path: %s\n",
+				        buf);
+				break;
 
-			char const *type_str =
-			    coap_type_string(decoder.type);
-			char const *request_str =
-			    coap_code_string(decoder.code);
+			case COAP_OPTION_TYPE_URI_HOST:
+				memcpy(buf, decoder.str.str,
+				       decoder.str.size);
+				fprintf(stderr, "\tUri-Host: %s\n",
+				        buf);
+				break;
 
-			fprintf(stderr, "Received COAP request:\n");
-			fprintf(stderr, "\t%s\n", type_str);
-			fprintf(stderr, "\t%s\n", request_str);
-			fprintf(stderr, "\tMessage Id: 0x%" PRIx16 "\n",
-			        (uint_least16_t)decoder.message_id);
-			fprintf(stderr, "\tToken: 0x%" PRIx64 "\n",
-			        (uint_least64_t)decoder.token);
+			case COAP_OPTION_TYPE_URI_PORT:
+				fprintf(stderr, "\tUri-Port: "
+				                "%" PRIu64 "\n",
+				        (uint_least64_t)decoder.uint);
+				break;
 
-			for (;;) {
-				char buf[255U + 1U] = {0};
+			case COAP_OPTION_TYPE_URI_QUERY:
+				memcpy(buf, decoder.str.str,
+				       decoder.str.size);
+				fprintf(stderr, "\tUri-Query: %s\n",
+				        buf);
+				break;
 
-				coap_decode_option(&decoder);
-				if (decoder.done)
-					break;
+			case COAP_OPTION_TYPE_ACCEPT: {
+				acceptable_format = decoder.uint;
+				acceptable_format_set = true;
 
-				switch (decoder.option_type) {
-				case COAP_OPTION_TYPE_CONTENT_FORMAT:
-					fprintf(stderr,
-					        "\tContent-Format: "
-					        "0x%" PRIx64 "\n",
-					        (uint_least64_t)
-					            decoder.uint);
-					break;
-
-				case COAP_OPTION_TYPE_URI_PATH:
-					memcpy(buf, decoder.str.str,
-					       decoder.str.size);
-					fprintf(stderr,
-					        "\tUri-Path: %s\n",
-					        buf);
-					break;
-
-				case COAP_OPTION_TYPE_URI_HOST:
-					memcpy(buf, decoder.str.str,
-					       decoder.str.size);
-					fprintf(stderr,
-					        "\tUri-Host: %s\n",
-					        buf);
-					break;
-
-				case COAP_OPTION_TYPE_URI_PORT:
-					fprintf(stderr, "\tUri-Port: "
+				char const *str =
+				    coap_content_format_string(
+				        acceptable_format);
+				if (0 == str) {
+					fprintf(stderr, "\tAccept: "
 					                "%" PRIu64 "\n",
 					        (uint_least64_t)
-					            decoder.uint);
-					break;
-
-				case COAP_OPTION_TYPE_URI_QUERY:
-					memcpy(buf, decoder.str.str,
-					       decoder.str.size);
+					            acceptable_format);
+				} else {
 					fprintf(stderr,
-					        "\tUri-Query: %s\n",
-					        buf);
-					break;
-
-				case COAP_OPTION_TYPE_ACCEPT: {
-					acceptable_format =
-					    decoder.uint;
-					acceptable_format_set = true;
-
-					char const *str =
-					    coap_content_format_string(
-					        acceptable_format);
-					if (0 == str) {
-						fprintf(
-						    stderr,
-						    "\tAccept: "
-						    "%" PRIu64 "\n",
-						    (uint_least64_t)
-						        acceptable_format);
-					} else {
-						fprintf(
-						    stderr,
-						    "\tAccept: %s\n",
-						    str);
-					}
-					break;
+					        "\tAccept: %s\n", str);
 				}
-				}
+				break;
+			}
 			}
 		}
 
@@ -724,49 +704,46 @@ static void process_sockfd(struct listener *listener)
 			break;
 		}
 
-		{
-			struct coap_encoder encoder = {0};
-			coap_error err = coap_encode_start(
-			    &encoder, logger, 1U, type, response_code,
-			    decoder.message_id, decoder.token,
-			    send_buffer, SEND_BUFFER_SIZE);
-			if (err != 0)
-				goto coap_error;
+		struct coap_encoder encoder = {0};
+		coap_err = coap_encode_start(
+		    &encoder, logger, 1U, type, response_code,
+		    decoder.message_id, decoder.token, send_buffer,
+		    SEND_BUFFER_SIZE);
+		if (coap_err != 0)
+			goto coap_error;
 
-			err = coap_encode_option_uint(
-			    &encoder, COAP_OPTION_TYPE_CONTENT_FORMAT,
-			    COAP_CONTENT_FORMAT_APPLICATION_JSON);
-			if (err != 0)
-				goto coap_error;
+		coap_err = coap_encode_option_uint(
+		    &encoder, COAP_OPTION_TYPE_CONTENT_FORMAT,
+		    COAP_CONTENT_FORMAT_APPLICATION_JSON);
+		if (coap_err != 0)
+			goto coap_error;
 
-			if (response_code != COAP_CODE_EMPTY) {
-				/* Dummy payload */
-				static char const payload[] =
-				    "{ 'hello' : 'world' }";
+		if (response_code != COAP_CODE_EMPTY) {
+			/* Dummy payload */
+			static char const payload[] =
+			    "{ 'hello' : 'world' }";
 
-				coap_encode_payload(&encoder, payload,
-				                    sizeof payload -
-				                        1U);
-			}
-
-		coap_error:
-			assert(err != COAP_ERROR_UNSUPPORTED_VERSION);
-			assert(err != COAP_ERROR_BAD_PACKET);
-			assert(err != COAP_ERROR_BAD_OPTION);
-			assert(0 == err);
-
-			encoded_size = encoder.buffer_index;
+			coap_encode_payload(&encoder, payload,
+			                    sizeof payload - 1U);
 		}
+
+	coap_error:
+		assert(coap_err != COAP_ERROR_UNSUPPORTED_VERSION);
+		assert(coap_err != COAP_ERROR_BAD_PACKET);
+		assert(coap_err != COAP_ERROR_BAD_OPTION);
+		assert(0 == coap_err);
+
+		encoded_size = encoder.buffer_index;
 
 	send:
 		for (;;) {
-			if (sendto(sockfd, send_buffer, encoded_size,
-			           MSG_DONTWAIT | MSG_NOSIGNAL,
-			           (void *)from_addr,
-			           sizeof *from_addr) != -1) {
+			ssize_t sent_bytes = sendto(
+			    sockfd, send_buffer, encoded_size,
+			    MSG_DONTWAIT | MSG_NOSIGNAL,
+			    (void *)from_addr, sizeof *from_addr);
+			if (sent_bytes != -1) {
 				break;
 			}
-
 			error = errno;
 
 			if (ENOMEM == error) {
@@ -778,8 +755,9 @@ static void process_sockfd(struct listener *listener)
 			}
 
 			if (error != 0) {
+				errno = error;
 				perror("sendto");
-				sock_fail(listener, errno);
+				sock_fail(listener, error);
 			}
 
 			short rflags =
@@ -836,24 +814,30 @@ static int bind_to_service(char const *service, char const *node,
 			}
 		}
 
+		int set_so_reuseaddr;
 		{
 			int xx = 1;
-			if (-1 == setsockopt(sockfd, SOL_SOCKET,
-			                     SO_REUSEADDR, &xx,
-			                     sizeof xx)) {
-				err = errno;
-				if (aip->ai_next != 0)
-					err = 0;
-				goto close_sock;
-			}
+			set_so_reuseaddr =
+			    setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR,
+			               &xx, sizeof xx);
+		}
+		if (-1 == set_so_reuseaddr) {
+			err = errno;
+			if (aip->ai_next != 0)
+				err = 0;
+			goto close_sock;
 		}
 
 		switch (family) {
 		case AF_INET: {
-			int xx = 1;
-			if (-1 == setsockopt(sockfd, IPPROTO_IP,
-			                     IP_FREEBIND, &xx,
-			                     sizeof xx)) {
+			int set_ip_freebind;
+			{
+				int xx = 1;
+				set_ip_freebind = setsockopt(
+				    sockfd, IPPROTO_IP, IP_FREEBIND,
+				    &xx, sizeof xx);
+			}
+			if (-1 == set_ip_freebind) {
 				if (aip->ai_next != 0)
 					err = 0;
 				goto close_sock;

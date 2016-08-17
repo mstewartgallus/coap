@@ -539,74 +539,85 @@ static void process_sockfd(struct listener *listener)
 
 		coap_log_msg(stderr, recv_buffer, message_size);
 
-		struct coap_decoder decoder = {0};
+		uint_fast16_t message_id;
+		uint_fast16_t token;
+		coap_code code;
 
 		coap_code response_code;
-		coap_error coap_err = 0;
+		{
+			struct coap_decoder decoder = {0};
 
-		coap_err = coap_decode_start(&decoder, logger,
-		                             recv_buffer, message_size);
-		switch (coap_err) {
-		case 0:
-			break;
+			coap_error coap_err = 0;
 
-		case COAP_ERROR_BAD_OPTION:
-			response_code =
-			    COAP_CODE_RESPONSE_CLIENT_ERROR_BAD_OPTION;
-			goto setup_response;
-
-		default:
-			response_code =
-			    COAP_CODE_RESPONSE_CLIENT_ERROR_BAD_REQUEST;
-			goto setup_response;
-		}
-
-		switch (decoder.code) {
-		case COAP_CODE_EMPTY:
-		case COAP_CODE_REQUEST_GET:
-			break;
-
-		default:
-			response_code =
-			    COAP_CODE_RESPONSE_CLIENT_ERROR_METHOD_NOT_FOUND;
-			goto setup_response;
-		}
-
-		for (;;) {
-			coap_decode_option(&decoder);
-			if (decoder.done)
+			coap_err = coap_decode_start(&decoder, logger,
+			                             recv_buffer,
+			                             message_size);
+			switch (coap_err) {
+			case 0:
 				break;
 
-			switch (decoder.option_type) {
-			case COAP_OPTION_TYPE_ACCEPT:
-				acceptable_format = decoder.uint;
-				acceptable_format_set = true;
+			case COAP_ERROR_BAD_OPTION:
+				response_code =
+				    COAP_CODE_RESPONSE_CLIENT_ERROR_BAD_OPTION;
+				goto setup_response;
+
+			default:
+				response_code =
+				    COAP_CODE_RESPONSE_CLIENT_ERROR_BAD_REQUEST;
+				goto setup_response;
+			}
+
+			for (;;) {
+				coap_decode_option(&decoder);
+				if (decoder.done)
+					break;
+
+				switch (decoder.option_type) {
+				case COAP_OPTION_TYPE_ACCEPT:
+					acceptable_format =
+					    decoder.uint;
+					acceptable_format_set = true;
+					break;
+				}
+			}
+
+			switch (decoder.code) {
+			case COAP_CODE_EMPTY:
+			case COAP_CODE_REQUEST_GET:
 				break;
-			}
-		}
 
-		/* Just ignore these */
-		if (decoder.type != COAP_TYPE_CONFIRMABLE) {
-			response_code =
-			    COAP_CODE_RESPONSE_CLIENT_ERROR_BAD_REQUEST;
-			goto setup_response;
-		}
-
-		if (decoder.has_payload) {
-			for (size_t ii = decoder.message_index;
-			     ii < decoder.message_size; ++ii) {
-				fputc(recv_buffer[ii], stderr);
+			default:
+				response_code =
+				    COAP_CODE_RESPONSE_CLIENT_ERROR_METHOD_NOT_FOUND;
+				goto setup_response;
 			}
-			fputc('\n', stderr);
+
+			/* Just ignore these */
+			if (decoder.type != COAP_TYPE_CONFIRMABLE) {
+				response_code =
+				    COAP_CODE_RESPONSE_CLIENT_ERROR_BAD_REQUEST;
+				goto setup_response;
+			}
+
+			if (decoder.has_payload) {
+				for (size_t ii = decoder.message_index;
+				     ii < decoder.message_size; ++ii) {
+					fputc(recv_buffer[ii], stderr);
+				}
+				fputc('\n', stderr);
+			}
+			fprintf(stderr, "\n");
+
+			code = decoder.code;
+			message_id = decoder.message_id;
+			token = decoder.token;
 		}
-		fprintf(stderr, "\n");
 
 		size_t encoded_size = 0U;
 
-		if (COAP_CODE_EMPTY == decoder.code) {
+		if (COAP_CODE_EMPTY == code) {
 			coap_empty_packet(COAP_TYPE_ACKNOWLEDGEMENT,
-			                  decoder.message_id,
-			                  send_buffer);
+			                  message_id, send_buffer);
 			encoded_size = COAP_EMPTY_PACKET_SIZE;
 			goto send;
 		}
@@ -638,10 +649,16 @@ static void process_sockfd(struct listener *listener)
 		}
 
 		struct coap_encoder encoder = {0};
-		coap_err = coap_encode_start(
-		    &encoder, logger, 1U, type, response_code,
-		    decoder.message_id, decoder.token, send_buffer,
-		    SEND_BUFFER_SIZE);
+
+		coap_error coap_err = 0;
+		coap_err =
+		    coap_encode_init(&encoder, logger, 1U, send_buffer,
+		                     SEND_BUFFER_SIZE);
+		if (coap_err != 0)
+			goto coap_error;
+
+		coap_err = coap_encode_header(
+		    &encoder, type, response_code, message_id, token);
 		if (coap_err != 0)
 			goto coap_error;
 
@@ -666,7 +683,7 @@ static void process_sockfd(struct listener *listener)
 		assert(coap_err != COAP_ERROR_BAD_OPTION);
 		assert(0 == coap_err);
 
-		encoded_size = encoder.buffer_index;
+		encoded_size = coap_encode_size(&encoder);
 
 	send:
 		error = send_back(listener, sockfd, send_buffer,

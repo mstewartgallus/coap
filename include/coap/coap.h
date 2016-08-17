@@ -146,11 +146,13 @@ struct coap_decoder {
 };
 
 struct coap_encoder {
-	struct coap_logger *logger;
-	char *buffer;
-	size_t buffer_size;
-	size_t buffer_index;
-	size_t last_option_type;
+	struct coap_logger *_logger;
+	char *_buffer;
+	size_t _buffer_size;
+	size_t _buffer_index;
+	size_t _last_option_type;
+	unsigned char _version;
+	unsigned char _state;
 };
 
 enum { COAP_EMPTY_PACKET_SIZE = 4 };
@@ -174,12 +176,14 @@ coap_error coap_decode_start(struct coap_decoder *decoder,
                              char const *message, size_t message_size);
 coap_error coap_decode_option(struct coap_decoder *decoder);
 
-coap_error coap_encode_start(struct coap_encoder *encoder,
-                             struct coap_logger *logger,
-                             unsigned char version, coap_type type,
-                             coap_code code, uint_fast16_t message_id,
-                             uint_fast64_t token, char *buffer,
-                             size_t buffer_size);
+coap_error coap_encode_init(struct coap_encoder *encoder,
+                            struct coap_logger *logger,
+                            unsigned char version, char *buffer,
+                            size_t buffer_size);
+coap_error coap_encode_header(struct coap_encoder *encoder,
+                              coap_type type, coap_code code,
+                              uint_fast16_t message_id,
+                              uint_fast64_t token);
 coap_error coap_encode_option_string(struct coap_encoder *encoder,
                                      coap_option_type option_type,
                                      char const *str, size_t str_size);
@@ -189,6 +193,7 @@ coap_error coap_encode_option_uint(struct coap_encoder *encoder,
 coap_error coap_encode_payload(struct coap_encoder *encoder,
                                char const *payload,
                                size_t payload_size);
+size_t coap_encode_size(struct coap_encoder *encoder);
 
 char const *coap_type_string(coap_type type);
 char const *coap_code_string(coap_code code);

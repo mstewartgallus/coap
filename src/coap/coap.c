@@ -134,17 +134,42 @@ static uint_fast64_t decode_bytes(char const *buf, size_t size)
 	return value;
 }
 
-coap_error coap_encode_start(struct coap_encoder *encoder,
-                             struct coap_logger *logger,
-                             unsigned char version, coap_type type,
-                             coap_code code, uint_fast16_t message_id,
-                             uint_fast64_t token, char *buffer,
-                             size_t buffer_size)
-{
-	size_t encoded_size = 0U;
+enum { ENCODER_STATE_START = 1,
+       ENCODER_STATE_WRITING_OPTIONS,
+       ENCODER_STATE_WROTE_PAYLOAD };
 
+coap_error coap_encode_init(struct coap_encoder *encoder,
+                            struct coap_logger *logger,
+                            unsigned char version, char *buffer,
+                            size_t buffer_size)
+{
 	if (version != 1U)
 		return COAP_ERROR_UNSUPPORTED_VERSION;
+
+	encoder->_logger = logger;
+	encoder->_buffer = buffer;
+	encoder->_buffer_size = buffer_size;
+	encoder->_buffer_index = 0U;
+	encoder->_last_option_type = 0U;
+	encoder->_version = 1U;
+	encoder->_state = ENCODER_STATE_START;
+
+	return 0;
+}
+
+coap_error coap_encode_header(struct coap_encoder *encoder,
+                              coap_type type, coap_code code,
+                              uint_fast16_t message_id,
+                              uint_fast64_t token)
+{
+	if (ENCODER_STATE_START != encoder->_state)
+		abort();
+
+	size_t last_option_type = encoder->_last_option_type;
+	char *buffer = encoder->_buffer;
+	size_t buffer_index = encoder->_buffer_index;
+	size_t buffer_size = encoder->_buffer_size;
+	unsigned char version = encoder->_version;
 
 	uint_least16_t network_message_id = htons(message_id);
 
@@ -158,21 +183,19 @@ coap_error coap_encode_start(struct coap_encoder *encoder,
 	memcpy(header_bytes + 1U, &code, 1U);
 	memcpy(header_bytes + 2U, &network_message_id, 2U);
 
-	encoded_size += sizeof header_bytes;
-	if (encoded_size > buffer_size)
+	buffer_index += sizeof header_bytes;
+	if (buffer_index > buffer_size)
 		return COAP_ERROR_BUFFER_OVERFLOW;
 	memcpy(buffer, header_bytes, sizeof header_bytes);
 
-	encoded_size += token_size;
-	if (encoded_size > buffer_size)
+	buffer_index += token_size;
+	if (buffer_index > buffer_size)
 		return COAP_ERROR_BUFFER_OVERFLOW;
-	write_bytes(buffer + encoded_size - token_size, token);
+	write_bytes(buffer + buffer_index - token_size, token);
 
-	encoder->logger = logger;
-	encoder->buffer = buffer;
-	encoder->buffer_size = buffer_size;
-	encoder->buffer_index = encoded_size;
-	encoder->last_option_type = 0U;
+	encoder->_buffer_index = buffer_index;
+	encoder->_last_option_type = 0U;
+	encoder->_state = ENCODER_STATE_WRITING_OPTIONS;
 
 	return 0;
 }
@@ -181,11 +204,14 @@ coap_error coap_encode_option_string(struct coap_encoder *encoder,
                                      coap_option_type option_type,
                                      char const *str, size_t str_size)
 {
-	size_t last_option_type = encoder->last_option_type;
-	struct coap_logger *logger = encoder->logger;
-	char *buffer = encoder->buffer;
-	size_t buffer_index = encoder->buffer_index;
-	size_t buffer_size = encoder->buffer_size;
+	if (ENCODER_STATE_WRITING_OPTIONS != encoder->_state)
+		abort();
+
+	size_t last_option_type = encoder->_last_option_type;
+	struct coap_logger *logger = encoder->_logger;
+	char *buffer = encoder->_buffer;
+	size_t buffer_index = encoder->_buffer_index;
+	size_t buffer_size = encoder->_buffer_size;
 
 	if (str_size > 255U)
 		return COAP_ERROR_BUFFER_OVERFLOW;
@@ -230,8 +256,8 @@ coap_error coap_encode_option_string(struct coap_encoder *encoder,
 
 	memcpy(buffer + buffer_index - str_size, str, str_size);
 
-	encoder->last_option_type = option_type;
-	encoder->buffer_index = buffer_index;
+	encoder->_last_option_type = option_type;
+	encoder->_buffer_index = buffer_index;
 
 	return 0;
 }
@@ -240,11 +266,14 @@ coap_error coap_encode_option_uint(struct coap_encoder *encoder,
                                    coap_option_type option_type,
                                    uint64_t uint)
 {
-	size_t last_option_type = encoder->last_option_type;
-	struct coap_logger *logger = encoder->logger;
-	char *buffer = encoder->buffer;
-	size_t buffer_index = encoder->buffer_index;
-	size_t buffer_size = encoder->buffer_size;
+	if (ENCODER_STATE_WRITING_OPTIONS != encoder->_state)
+		abort();
+
+	size_t last_option_type = encoder->_last_option_type;
+	struct coap_logger *logger = encoder->_logger;
+	char *buffer = encoder->_buffer;
+	size_t buffer_index = encoder->_buffer_index;
+	size_t buffer_size = encoder->_buffer_size;
 
 	int coap_option_delta = option_type - last_option_type;
 	if (coap_option_delta < 0) {
@@ -271,8 +300,8 @@ coap_error coap_encode_option_uint(struct coap_encoder *encoder,
 
 	write_bytes(buffer + buffer_index - option_length, uint);
 
-	encoder->last_option_type = option_type;
-	encoder->buffer_index = buffer_index;
+	encoder->_last_option_type = option_type;
+	encoder->_buffer_index = buffer_index;
 
 	return 0;
 }
@@ -280,9 +309,12 @@ coap_error coap_encode_option_uint(struct coap_encoder *encoder,
 coap_error coap_encode_payload(struct coap_encoder *encoder,
                                char const *payload, size_t payload_size)
 {
-	char *buffer = encoder->buffer;
-	size_t buffer_index = encoder->buffer_index;
-	size_t buffer_size = encoder->buffer_size;
+	if (ENCODER_STATE_WRITING_OPTIONS != encoder->_state)
+		abort();
+
+	char *buffer = encoder->_buffer;
+	size_t buffer_index = encoder->_buffer_index;
+	size_t buffer_size = encoder->_buffer_size;
 
 	unsigned char options_end = 0xFF;
 	buffer_index += sizeof options_end;
@@ -298,9 +330,15 @@ coap_error coap_encode_payload(struct coap_encoder *encoder,
 	memcpy(buffer + buffer_index - payload_size, payload,
 	       payload_size);
 
-	encoder->buffer_index = buffer_index;
+	encoder->_state = ENCODER_STATE_WROTE_PAYLOAD;
+	encoder->_buffer_index = buffer_index;
 
 	return 0;
+}
+
+size_t coap_encode_size(struct coap_encoder *encoder)
+{
+	return encoder->_buffer_index;
 }
 
 coap_error coap_decode_start(struct coap_decoder *decoder,

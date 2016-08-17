@@ -308,10 +308,16 @@ int main(int argc, char **argv)
 		struct coap_encoder encoder = {0};
 
 		coap_error err;
-		err = coap_encode_start(
+
+		err = coap_encode_init(
 		    &encoder, (struct coap_logger *)&my_logger, 1U,
-		    message_type, COAP_CODE_REQUEST_GET, message_id,
-		    token, request.buf, sizeof request.buf);
+		    request.buf, sizeof request.buf);
+		if (err != 0)
+			goto coap_error;
+
+		err = coap_encode_header(&encoder, message_type,
+		                         COAP_CODE_REQUEST_GET,
+		                         message_id, token);
 		if (err != 0)
 			goto coap_error;
 
@@ -379,7 +385,7 @@ int main(int argc, char **argv)
 		request.token = token;
 		request.timeout = random_timeout_ms(mycfg);
 		request.transmission_counter = 0;
-		request.size = encoder.buffer_index;
+		request.size = coap_encode_size(&encoder);
 
 		if (-1 == send(sockfd, request.buf, request.size, 0)) {
 			perror("send");
